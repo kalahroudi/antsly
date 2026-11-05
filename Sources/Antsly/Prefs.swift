@@ -3,6 +3,7 @@
 import SwiftUI
 import ServiceManagement
 import AppKit
+import AntslyKit
 
 enum ThemeChoice: String, CaseIterable { case system, light, dark
     var label: String { rawValue.capitalized }
@@ -25,18 +26,29 @@ final class Prefs {
     var updateChannel: UpdateChannel { didSet { d.set(updateChannel.rawValue, forKey: "updateChannel") } }
     var autoCheckUpdates: Bool { didSet { d.set(autoCheckUpdates, forKey: "autoCheckUpdates") } }
     var sidebarCollapsed: Bool { didSet { d.set(sidebarCollapsed, forKey: "sidebarCollapsed") } }
+    /// Where the workspace lives. Moving it into iCloud Drive is how cloud sync works: no account, no server.
+    var workspacePath: String { didSet { d.set(workspacePath, forKey: "workspacePath") } }
+    var historyEnabled: Bool { didSet { d.set(historyEnabled, forKey: "historyEnabled") } }
+    var autoSyncGit: Bool { didSet { d.set(autoSyncGit, forKey: "autoSyncGit") } }
+    var liveCollab: Bool { didSet { d.set(liveCollab, forKey: "liveCollab") } }
+    var displayName: String { didSet { d.set(displayName, forKey: "displayName") } }
 
     /// Launch at login is on by default; the user can turn it off. Backed by SMAppService (Login Items).
     private(set) var launchAtLogin: Bool = false
     private(set) var launchAtLoginError: String?
 
     private init() {
-        d.register(defaults: ["notify": true, "refreshSeconds": 5, "showDockIcon": true, "autoCheckUpdates": true])
+        d.register(defaults: ["notify": true, "refreshSeconds": 5, "showDockIcon": true, "autoCheckUpdates": true, "historyEnabled": true, "autoSyncGit": true])
         theme = ThemeChoice(rawValue: d.string(forKey: "theme") ?? "") ?? .system
         showDockIcon = d.bool(forKey: "showDockIcon")
         notify = d.bool(forKey: "notify")
         refreshSeconds = d.integer(forKey: "refreshSeconds")
         sidebarCollapsed = d.bool(forKey: "sidebarCollapsed")
+        workspacePath = d.string(forKey: "workspacePath") ?? WorkspaceStore.defaultRoot.path
+        historyEnabled = d.bool(forKey: "historyEnabled")
+        autoSyncGit = d.bool(forKey: "autoSyncGit")
+        liveCollab = d.bool(forKey: "liveCollab")
+        displayName = d.string(forKey: "displayName") ?? NSFullUserName()
         autoCheckUpdates = d.bool(forKey: "autoCheckUpdates")
         updateChannel = UpdateChannel(rawValue: d.string(forKey: "updateChannel") ?? "") ?? .releases
         // First run: opt in to launch at login. After that the user's choice always wins.

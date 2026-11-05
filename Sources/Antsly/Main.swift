@@ -65,8 +65,7 @@ enum AntslyMain {
             item("Cut", #selector(NSText.cut(_:)), "x"), item("Copy", #selector(NSText.copy(_:)), "c"),
             item("Paste", #selector(NSText.paste(_:)), "v"), item("Select All", #selector(NSText.selectAll(_:)), "a"),
         ])
-        add("Session", [item("New Session", #selector(AppDelegate.newSession), "t", target: delegate)]
-            + (1...9).map { n in let i = item("Session \(n)", #selector(AppDelegate.selectSession(_:)), "\(n)", target: delegate); i.tag = n - 1; i.isHidden = true; return i })
+        add("File", [item("New Page", #selector(AppDelegate.newPage), "n", target: delegate)])
         add("Window", [
             item("Minimize", #selector(NSWindow.performMiniaturize(_:)), "m"),
             item("Close", #selector(NSWindow.performClose(_:)), "w"),

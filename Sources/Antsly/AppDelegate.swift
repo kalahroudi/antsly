@@ -16,7 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if SnapshotMode.dir != nil { SnapshotMode.run(); return }
-        SessionsModel.shared.restore()                                   // metadata only; content loads when a session is shown
+        WorkspaceModel.shared.load()
         Prefs.shared.applyTheme()
         Prefs.shared.applyDockIcon()
         NSApp.applicationIconImage = AppIcon.image(size: 512, padded: true)
@@ -78,17 +78,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
         if let pane { Nav.shared.pane = pane }
         popover.performClose(nil)
         if managerWindow == nil {
-            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 700),
+            // Open large enough that panes need no scrolling, but never larger than the screen.
+            let vis = (NSScreen.main ?? NSScreen.screens[0]).visibleFrame
+            let size = NSSize(width: min(1240, vis.width * 0.92), height: min(800, vis.height * 0.92))
+            let w = NSWindow(contentRect: NSRect(origin: .zero, size: size),
                              styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                              backing: .buffered, defer: false)
             w.titlebarAppearsTransparent = true
             w.titleVisibility = .hidden
             w.isReleasedWhenClosed = false
-            w.minSize = NSSize(width: 860, height: 560)
-            w.setFrameAutosaveName("AntslyManager")
+            w.minSize = NSSize(width: 900, height: 620)
+            w.setFrameAutosaveName("AntslyManager2")
             w.delegate = self
             w.contentView = NSHostingView(rootView: ManagerView())
-            if !w.setFrameUsingName("AntslyManager") { w.center() }
+            if !w.setFrameUsingName("AntslyManager2") { w.center() }
             managerWindow = w
         }
         managerWindow?.makeKeyAndOrderFront(nil)
@@ -99,7 +102,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
     func windowWillClose(_ notification: Notification) {
         guard (notification.object as? NSWindow) === managerWindow else { return }
         model.setManagerVisible(false)
-        SessionsModel.shared.releaseContent()   // saved first, then dropped: a closed window holds no session memory
+        WorkspaceModel.shared.flush()   // saved first, then the window's views are dropped
         managerWindow?.contentView = nil   // frees the SwiftUI tree
         managerWindow = nil
     }
@@ -110,10 +113,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
     }
 
     // The app lives in the menu bar: closing the last window must not quit it.
-    func applicationDidResignActive(_ notification: Notification) { SessionsModel.shared.flush() }
-    func applicationWillTerminate(_ notification: Notification) { SessionsModel.shared.shutdown() }
-    @objc func newSession() { showManager(); SessionsModel.shared.add() }
-    @objc func selectSession(_ sender: NSMenuItem) { showManager(); SessionsModel.shared.selectIndex(sender.tag) }
+    func applicationDidResignActive(_ notification: Notification) { WorkspaceModel.shared.flush() }
+    func applicationWillTerminate(_ notification: Notification) { WorkspaceModel.shared.flush(); Collab.shared.stopHosting() }
+    @objc func newPage() { showManager(pane: .workspace); WorkspaceModel.shared.newPage() }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 }

@@ -210,3 +210,12 @@ public enum GanttMagicImport {
         return Plan(title: (o["title"] as? String) ?? "Imported plan", phases: ph, people: people, tasks: out, notes: (o["footnote"] as? String) ?? "")
     }
 }
+
+extension PlanMath {
+    /// Records a progress snapshot when the last one is over a day old, so burnup history builds up as the plan is edited.
+    public static func snapshotIfDue(_ plan: Plan, now: Date = Date()) -> Plan {
+        if let last = plan.snapshots.map(\.date).max(), cal.startOfDay(for: last) == cal.startOfDay(for: now) { return plan }
+        guard !plan.tasks.isEmpty else { return plan }
+        return snapshot(plan, now: now)
+    }
+}

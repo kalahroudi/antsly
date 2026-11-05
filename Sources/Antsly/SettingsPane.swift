@@ -38,6 +38,17 @@ struct SettingsPane: View {
         @Bindable var p = prefs
         return HStack(alignment: .top, spacing: 18) {
             VStack(spacing: 18) {
+                SettingsGroup("Workspace") {
+                    SettingRow("Sync with iCloud Drive", "Keeps your workspace in iCloud Drive so it appears on your other Macs. No account or server needed.") {
+                        Toggle("", isOn: Binding(get: { WorkspaceModel.shared.inICloud }, set: { WorkspaceModel.shared.setICloud($0) })).labelsHidden().toggleStyle(.switch).tint(Theme.accent)
+                    }
+                    SettingRow("Folder", WorkspaceModel.shared.store.root.path.replacingOccurrences(of: NSHomeDirectory(), with: "~")) {
+                        Button("Show in Finder") { NSWorkspace.shared.open(WorkspaceModel.shared.store.root) }.buttonStyle(Pill())
+                    }
+                    SettingRow("Keep version history", "Saves a version about every five minutes while Antsly is open.") {
+                        Toggle("", isOn: Binding(get: { prefs.historyEnabled }, set: { on in prefs.historyEnabled = on; if on { Task { await WorkspaceModel.shared.enableHistory() } } })).labelsHidden().toggleStyle(.switch).tint(Theme.accent)
+                    }
+                }
                 SettingsGroup("Startup") {
                     SettingRow("Launch at login", "Adds the app to Login Items. Turn it off any time.", error: prefs.launchAtLoginError) { Toggle("", isOn: Binding(get: { prefs.launchAtLogin }, set: { prefs.setLaunchAtLogin($0) })).labelsHidden().toggleStyle(.switch).tint(Theme.accent) }
                 }
@@ -65,7 +76,7 @@ struct SettingsPane: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Antsly").font(.system(size: 18, weight: .semibold))
                     Text("Version \(BuildInfo.current.version) · \(BuildInfo.current.shortCommit)").foregroundStyle(.secondary)
-                    Text("One sentence about the app.").font(.system(size: 12.5))
+                    Text("Notes, documents, databases and project plans in one native Mac app.").font(.system(size: 12.5))
                 }
             }
             HStack(spacing: 10) {

@@ -31,7 +31,7 @@ final class AppModel {
     // UI state
     var tasks: [BackgroundTask] = []
     var toast: Toast?
-    var setupState = SetupState.detect()
+    var setupState = SetupState.detect(workspace: WorkspaceModel.shared.store.root)
 
     var onStatusChange: ((StatusIcon.State) -> Void)?
     /// Set by `--snapshot` so screenshots use sample data and nothing is refreshed.
@@ -70,7 +70,9 @@ final class AppModel {
 
     func refresh() async {
         if demo { loadedOnce = true; return }
-        setupState = SetupState.detect()
+        setupState = SetupState.detect(workspace: WorkspaceModel.shared.store.root)
+        WorkspaceModel.shared.reloadIfChanged()
+        if Prefs.shared.autoSyncGit { await WorkspaceModel.shared.autoVersionIfDue() }
         // Do the real reads here, off the main actor (Shell.run is async). Then publish results.
         onStatusChange?(busy ? .busy : .idle)
         loadedOnce = true; updatedAt = .now
@@ -125,18 +127,36 @@ final class AppModel {
         }
     }
 
+    /// Installs one optional feature (Tailscale, GitHub tool) with Homebrew. If Homebrew is missing, shows the Homebrew step.
+    func install(id: String) {
+        guard let item = setupState.items.first(where: { $0.id == id }) else { return }
+        guard setupState.homebrewPresent else { Nav.shared.pane = .workspace; show("Homebrew is needed first. Follow the setup steps.", error: true); return }
+        runTask("Installing \(item.title)", after: { [weak self] _ in
+            self?.setupState = SetupState.detect(workspace: WorkspaceModel.shared.store.root); Task { await Collab.shared.refreshStatus() }
+        }) { log in
+            switch item.install {
+            case .brew(let f): try await SetupState.installMissing([f], onLine: log)
+            case .cask(let c): try await SetupState.installMissing([], casks: [c], onLine: log)
+            default: break
+            }
+        }
+    }
+
     // MARK: First-run setup: automate everything that can be, explain the rest
 
     func setUpEverything() {
         let state = SetupState.detect()
         runTask("Setting up Antsly") { log in
-            if !state.brewFormulae.isEmpty {
+            // Required items only: optional features (Tailscale, GitHub) are installed from the Sharing screen when wanted.
+            let formulae = state.missingRequired.compactMap { if case .brew(let f) = $0.install { f } else { nil } }
+            if !formulae.isEmpty {
                 guard state.homebrewPresent else { throw ShellError.failed(command: "setup", status: 1, stderr: "Homebrew is needed first. Install it, then try again.") }
-                log("Installing \(state.brewFormulae.joined(separator: ", ")) with Homebrew…")
-                try await SetupState.installMissing(state.brewFormulae, onLine: log)
+                log("Installing \(formulae.joined(separator: ", ")) with Homebrew…")
+                try await SetupState.installMissing(formulae, onLine: log)
             }
-            // Create first-run resources here (a default profile, a data folder, a config file).
+            log("Creating your workspace folder…")
             try AppPaths().ensureDirectories()
+            try await MainActor.run { try WorkspaceModel.shared.store.ensure() }
         }
     }
 }

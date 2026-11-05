@@ -33,7 +33,7 @@ struct PopoverView: View {
                 Text("Antsly").font(.system(size: 15, weight: .semibold))
                 HStack(spacing: 6) {
                     StatusDot(color: model.busy ? Theme.warn : Theme.ok)
-                    Text(model.runningTask.map { $0.title + "…" } ?? model.status).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
+                    Text(model.runningTask.map { $0.title + "…" } ?? (Collab.shared.peopleOnline > 0 ? "\(Collab.shared.peopleOnline) online" : model.status)).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
             Spacer()
@@ -41,15 +41,27 @@ struct PopoverView: View {
     }
 
     private var content: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            // REPLACE: stat cards, a short list, quick actions.
-            Text("Nothing to show yet.").font(.system(size: 12.5)).foregroundStyle(.secondary)
+        let ws = WorkspaceModel.shared
+        return VStack(alignment: .leading, spacing: 2) {
+            SectionLabel("Recent")
+            ForEach(ws.pages.prefix(5)) { p in
+                Button { ws.selected = .page(p.id); openManager(.workspace) } label: {
+                    HStack {
+                        Image(systemName: "doc.text").foregroundStyle(.secondary).frame(width: 18)
+                        Text(p.title.isEmpty ? "Untitled" : p.title).font(.system(size: 13)).lineLimit(1)
+                        Spacer()
+                        Text(Date(timeIntervalSince1970: p.updated).formatted(.relative(presentation: .named))).font(.system(size: 11)).foregroundStyle(.secondary)
+                    }.padding(.vertical, 5).padding(.horizontal, 4).contentShape(Rectangle())
+                }.buttonStyle(.plain)
+            }
+            if ws.pages.isEmpty { Text("No pages yet.").font(.system(size: 12.5)).foregroundStyle(.secondary) }
         }.frame(maxWidth: .infinity, alignment: .leading).card()
     }
 
     private var footer: some View {
         HStack {
-            Button("Open Antsly") { openManager(.overview) }.buttonStyle(Pill(kind: .primary))
+            Button("Quick note") { WorkspaceModel.shared.newPage(); openManager(.workspace) }.buttonStyle(Pill(kind: .primary))
+            Button("Open Antsly") { openManager(.workspace) }.buttonStyle(Pill())
             Spacer()
             Button { openManager(.settings) } label: { Image(systemName: "gearshape") }.buttonStyle(.plain).foregroundStyle(.secondary).help("Settings").accessibilityLabel("Settings")
             Button { NSApp.terminate(nil) } label: { Image(systemName: "power") }.buttonStyle(.plain).foregroundStyle(.secondary).help("Quit Antsly").accessibilityLabel("Quit")
