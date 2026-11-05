@@ -22,6 +22,7 @@ info "commit" "/usr/libexec/PlistBuddy -c 'Print AntslyCommit' '$APP/Contents/In
 check "arm64 binary" "lipo -archs '$APP/Contents/MacOS/Antsly' | grep -q arm64"
 check "signature valid (deep, strict)" "codesign --verify --deep --strict -vv '$APP'"
 info "signing authority" "codesign -dvv '$APP' 2>&1 | grep -E 'Authority|Signature=|TeamIdentifier'"
+info "designated requirement (must name the bundle id so privacy grants survive updates)" "codesign -d -r- '$APP' 2>&1 | grep designated"
 check "MCP binary signed" "codesign --verify --strict '$APP/Contents/MacOS/antsly-mcp'"
 if spctl -a -vvv -t exec "$APP" >"$WORK/out" 2>&1; then echo "PASS  Gatekeeper accepts the app"; else echo "NOTE  Gatekeeper rejects the app: $(head -2 "$WORK/out" | tr '\n' ' ')"; fi
 if xcrun stapler validate "$DMG" >"$WORK/out" 2>&1; then echo "PASS  notarization ticket stapled"; else echo "NOTE  not notarized (no stapled ticket)"; fi

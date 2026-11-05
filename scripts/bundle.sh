@@ -48,15 +48,21 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# Ad-hoc signed by default. With SIGN_IDENTITY set to a "Developer ID Application: ..." identity it is signed
-# for distribution with the hardened runtime.
+# Ad-hoc signed by default. An ad-hoc signature normally identifies a build by its code hash, so macOS treats every
+# rebuild as a different app and drops privacy grants (Accessibility, Automation, Full Disk Access...). To keep a grant
+# across updates, the signature carries a fixed designated requirement tied to the bundle id, not to the code hash.
+# With SIGN_IDENTITY set to a "Developer ID Application: ..." identity the default requirement (team id + bundle id)
+# is already stable, so it is signed for distribution with the hardened runtime and no override.
+APP_ID="com.kalahroudi.antsly"
 if [ "${SIGN_IDENTITY:--}" = "-" ]; then
-  SIGN_FLAGS=(--force --sign -)
+  APP_FLAGS=(--force --sign - -r="designated => identifier \"$APP_ID\"")
+  MCP_FLAGS=(--force --sign - --identifier "$APP_ID-mcp" -r="designated => identifier \"$APP_ID-mcp\"")
 else
-  SIGN_FLAGS=(--force --timestamp --options runtime --entitlements scripts/Antsly.entitlements --sign "$SIGN_IDENTITY")
+  APP_FLAGS=(--force --timestamp --options runtime --entitlements scripts/Antsly.entitlements --sign "$SIGN_IDENTITY")
+  MCP_FLAGS=("${APP_FLAGS[@]}")
 fi
-codesign "${SIGN_FLAGS[@]}" "$APP/Contents/MacOS/antsly-mcp"
-codesign "${SIGN_FLAGS[@]}" "$APP"
+codesign "${MCP_FLAGS[@]}" "$APP/Contents/MacOS/antsly-mcp"
+codesign "${APP_FLAGS[@]}" "$APP"
 codesign --verify --strict "$APP"
 
 echo "Built $APP"
