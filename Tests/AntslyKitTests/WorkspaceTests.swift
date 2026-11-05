@@ -85,6 +85,8 @@ final class WorkspaceTests: XCTestCase {
     func testInvite() {
         let i = Invite(host: "mo-mac.tail1a2b.ts.net", workspace: "Product wiki")
         XCTAssertEqual(Invite.parse(i.url), i)
+        XCTAssertEqual(Invite.parse("antsly://join/mo-mac.ts.net:47935/Notes"), Invite(host: "mo-mac.ts.net", port: 47935, workspace: "Notes"))
+        XCTAssertEqual(Invite.parse("antsly://join/mo-mac.ts.net/Notes")?.port, Invite.defaultPort)
         XCTAssertNil(Invite.parse("https://example.com")); XCTAssertNil(Invite.parse("antsly://join/"))
     }
 
@@ -116,5 +118,36 @@ final class WorkspaceTests: XCTestCase {
         let diff = await repo.diff(of: log[0])
         XCTAssertTrue(diff.contains { $0.kind == .added && $0.text.contains("Changed") })
         XCTAssertTrue(diff.contains { $0.kind == .removed && $0.text.contains("Ship it") })
+    }
+}
+
+final class UndoTests: XCTestCase {
+    func testTypingCoalescesButStructureDoesNot() {
+        var h = UndoHistory<[String]>()
+        let t0 = Date(timeIntervalSince1970: 1000)
+        h.record(key: "page:a:1", state: ["v0"], now: t0)
+        h.record(key: "page:a:1", state: ["v1"], now: t0.addingTimeInterval(0.3))      // same phrase: no new step
+        h.record(key: "page:a:2", state: ["v2"], now: t0.addingTimeInterval(0.4))      // a block was added: new step
+        XCTAssertEqual(h.undo(current: ["now"]), ["v2"])
+        XCTAssertEqual(h.undo(current: ["v2"]), ["v0"])
+        XCTAssertNil(h.undo(current: ["v0"]))
+    }
+    func testPauseStartsNewStepAndRedoWorksUntilNewEdit() {
+        var h = UndoHistory<Int>()
+        let t0 = Date(timeIntervalSince1970: 1000)
+        h.record(key: "k", state: 1, now: t0)
+        h.record(key: "k", state: 2, now: t0.addingTimeInterval(2))                    // paused: new step
+        XCTAssertEqual(h.undo(current: 3), 2); XCTAssertTrue(h.canRedo)
+        XCTAssertEqual(h.redo(current: 2), 3)
+        XCTAssertEqual(h.undo(current: 3), 2)
+        h.record(key: "other", state: 9, now: t0.addingTimeInterval(5))                // a new edit clears redo
+        XCTAssertFalse(h.canRedo)
+    }
+    func testLimit() {
+        var h = UndoHistory<Int>(limit: 3)
+        for i in 0..<10 { h.record(key: "\(i)", state: i, now: Date(timeIntervalSince1970: Double(i) * 10)) }
+        var n = 0; var cur = 99
+        while let s = h.undo(current: cur) { cur = s; n += 1 }
+        XCTAssertEqual(n, 3)
     }
 }

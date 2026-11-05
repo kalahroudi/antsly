@@ -61,11 +61,12 @@ enum AntslyMain {
             item("Quit Antsly", #selector(NSApplication.terminate(_:)), "q"),
         ])
         add("Edit", [
-            item("Undo", Selector(("undo:")), "z"), item("Redo", Selector(("redo:")), "z", [.command, .shift]), .separator(),
+            item("Undo", #selector(AppDelegate.undoAction), "z", target: delegate), item("Redo", #selector(AppDelegate.redoAction), "z", [.command, .shift], target: delegate), .separator(),
             item("Cut", #selector(NSText.cut(_:)), "x"), item("Copy", #selector(NSText.copy(_:)), "c"),
             item("Paste", #selector(NSText.paste(_:)), "v"), item("Select All", #selector(NSText.selectAll(_:)), "a"),
         ])
         add("File", [item("New Page", #selector(AppDelegate.newPage), "n", target: delegate)])
+        add("Go", [item("Back", #selector(AppDelegate.goBack), "[", target: delegate), item("Forward", #selector(AppDelegate.goForward), "]", target: delegate)])
         add("Window", [
             item("Minimize", #selector(NSWindow.performMiniaturize(_:)), "m"),
             item("Close", #selector(NSWindow.performClose(_:)), "w"),

@@ -19,6 +19,12 @@ final class WorkspaceModel {
     var query = ""
     var loaded = false
 
+    // Undo and redo. Whole-workspace snapshots, merged while you keep typing in the same place.
+    struct Snap { var pages: [Page]; var databases: [Database]; var plans: [Plan] }
+    @ObservationIgnored private var history = UndoHistory<Snap>()
+    private(set) var canUndo = false
+    private(set) var canRedo = false
+
     // Version history and git sharing
     var commits: [Commit] = []
     var diff: [DiffLine] = []
@@ -88,12 +94,45 @@ final class WorkspaceModel {
         return latest
     }
 
+    // MARK: Undo and redo
+
+    /// Call before a local change. Changes with the same key within a second share one undo step.
+    private func recordUndo(_ key: String) {
+        history.record(key: key, state: Snap(pages: pages, databases: databases, plans: plans))
+        canUndo = history.canUndo; canRedo = history.canRedo
+    }
+
+    func undo() { if let s = history.undo(current: current()) { restore(s) }; canUndo = history.canUndo; canRedo = history.canRedo }
+    func redo() { if let s = history.redo(current: current()) { restore(s) }; canUndo = history.canUndo; canRedo = history.canRedo }
+    private func current() -> Snap { Snap(pages: pages, databases: databases, plans: plans) }
+
+    private func restore(_ s: Snap) {
+        for old in pages where !s.pages.contains(where: { $0.id == old.id }) { store.delete(pageID: old.id); Collab.shared.sendRemoved(old.id) }
+        for old in databases where !s.databases.contains(where: { $0.id == old.id }) { store.delete(databaseID: old.id) }
+        for old in plans where !s.plans.contains(where: { $0.id == old.id }) { store.delete(planID: old.id) }
+        for p in s.pages where pages.first(where: { $0.id == p.id }) != p { dirtyPages.insert(p.id); Collab.shared.send(p) }
+        for d in s.databases where databases.first(where: { $0.id == d.id }) != d { dirtyDBs.insert(d.id) }
+        for p in s.plans where plans.first(where: { $0.id == p.id }) != p { dirtyPlans.insert(p.id) }
+        pages = s.pages; databases = s.databases; plans = s.plans
+        if let sel = selected, !exists(sel) { selected = pages.first.map { .page($0.id) } }
+        scheduleSave()
+    }
+
+    func exists(_ item: Item) -> Bool {
+        switch item {
+        case .page(let id): pages.contains { $0.id == id }
+        case .database(let id): databases.contains { $0.id == id }
+        case .plan(let id): plans.contains { $0.id == id }
+        }
+    }
+
     // MARK: Editing
 
     func page(_ id: String) -> Page? { pages.first { $0.id == id } }
 
     func editPage(_ id: String, broadcast: Bool = true, _ change: (inout Page) -> Void) {
         guard let i = pages.firstIndex(where: { $0.id == id }) else { return }
+        if broadcast { recordUndo("page:\(id):\(pages[i].blocks.count)") }
         let before = pages[i]
         change(&pages[i])
         let now = Date().timeIntervalSince1970
@@ -106,11 +145,13 @@ final class WorkspaceModel {
 
     func editDatabase(_ id: String, _ change: (inout Database) -> Void) {
         guard let i = databases.firstIndex(where: { $0.id == id }) else { return }
+        recordUndo("db:\(id):\(databases[i].rows.count):\(databases[i].columns.count)")
         change(&databases[i]); dirtyDBs.insert(id); scheduleSave()
     }
 
     func editPlan(_ id: String, _ change: (inout Plan) -> Void) {
         guard let i = plans.firstIndex(where: { $0.id == id }) else { return }
+        recordUndo("plan:\(id):\(plans[i].tasks.count):\(plans[i].phases.count):\(plans[i].people.count)")
         change(&plans[i]); dirtyPlans.insert(id); scheduleSave()
     }
 
@@ -124,9 +165,10 @@ final class WorkspaceModel {
 
     func removeRemote(pageID: String) { pages.removeAll { $0.id == pageID }; store.delete(pageID: pageID); if selected == .page(pageID) { selected = nil } }
 
-    func newPage() { let p = Page(); pages.insert(p, at: 0); dirtyPages.insert(p.id); selected = .page(p.id); scheduleSave(); Collab.shared.send(p) }
-    func newDatabase() { let d = Database.tasks(title: "Untitled database"); databases.append(d); dirtyDBs.insert(d.id); selected = .database(d.id); scheduleSave() }
+    func newPage() { recordUndo(UUID().uuidString); let p = Page(); pages.insert(p, at: 0); dirtyPages.insert(p.id); selected = .page(p.id); scheduleSave(); Collab.shared.send(p) }
+    func newDatabase() { recordUndo(UUID().uuidString); let d = Database.tasks(title: "Untitled database"); databases.append(d); dirtyDBs.insert(d.id); selected = .database(d.id); scheduleSave() }
     func newPlan() {
+        recordUndo(UUID().uuidString)
         let ph = Plan.Phase(name: "Phase 1", color: "#2563EB")
         let now = Date()
         let p = Plan(title: "New plan", phases: [ph], people: [Plan.Person(name: NSFullUserName())],
@@ -135,6 +177,7 @@ final class WorkspaceModel {
     }
 
     func delete(_ item: Item) {
+        recordUndo(UUID().uuidString)
         switch item {
         case .page(let id): pages.removeAll { $0.id == id }; store.delete(pageID: id); Collab.shared.sendRemoved(id)
         case .database(let id): databases.removeAll { $0.id == id }; store.delete(databaseID: id)
@@ -145,6 +188,7 @@ final class WorkspaceModel {
 
     func importGanttMagic(_ url: URL) throws {
         var plan = try GanttMagicImport.parse(Data(contentsOf: url))
+        recordUndo(UUID().uuidString)
         plan.title = url.deletingPathExtension().lastPathComponent
         plans.append(plan); dirtyPlans.insert(plan.id); selected = .plan(plan.id); scheduleSave()
     }

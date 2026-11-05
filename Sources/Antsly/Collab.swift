@@ -14,6 +14,7 @@ final class Collab {
     enum JoinState: Equatable { case idle, connecting, waiting, joined(String), denied(String), failed(String) }
 
     var hosting = false
+    var hostingPort: UInt16 = Invite.defaultPort
     var guests: [Guest] = []
     var joinState: JoinState = .idle
     var joinedHost: String?
@@ -38,19 +39,36 @@ final class Collab {
     }
 
     func refreshStatus() async { status = await TailscaleStatus.current() }
-    var invite: Invite? { status.dnsName.map { Invite(host: $0, workspace: "Antsly") } }
+    var invite: Invite? { status.dnsName.map { Invite(host: $0, port: hostingPort, workspace: "Antsly") } }
 
     // MARK: Hosting
 
     func startHosting() {
         guard listener == nil else { return }
+        listen(on: Invite.defaultPort, attempts: 10)
+    }
+
+    /// Another app may already hold the port, so try the next few before giving up. The invite carries whichever port worked.
+    private func listen(on port: UInt16, attempts: Int) {
         do {
-            let l = try NWListener(using: .tcp, on: NWEndpoint.Port(rawValue: Invite.port)!)
+            let l = try NWListener(using: .tcp, on: NWEndpoint.Port(rawValue: port)!)
             l.newConnectionHandler = { [weak self] c in MainActor.assumeIsolated { self?.accept(c) } }
-            l.stateUpdateHandler = { [weak self] st in MainActor.assumeIsolated {
-                if case .failed(let e) = st { AppLog.error(e, context: "collab listener"); self?.hosting = false; self?.listener = nil } } }
-            l.start(queue: .main); listener = l; hosting = true
-        } catch { AppLog.error(error, context: "collab listener"); AppModel.shared.show("Could not start sharing. Another app may be using the sharing port.", error: true) }
+            l.stateUpdateHandler = { [weak self, weak l] st in MainActor.assumeIsolated {
+                guard let self, let l, self.listener === l else { return }
+                switch st {
+                case .ready: self.hosting = true; self.hostingPort = port
+                case .failed(let e):
+                    l.cancel(); self.listener = nil; self.hosting = false
+                    if attempts > 1 { self.listen(on: port + 1, attempts: attempts - 1) }
+                    else { AppLog.error(e, context: "collab listener"); AppModel.shared.show("Could not start sharing. Ports \(Invite.defaultPort) to \(Invite.defaultPort + 9) are all in use.", error: true) }
+                default: break
+                } } }
+            listener = l
+            l.start(queue: .main)
+        } catch {
+            AppLog.error(error, context: "collab listener")
+            if attempts > 1 { listen(on: port + 1, attempts: attempts - 1) } else { AppModel.shared.show("Could not start sharing on this Mac.", error: true) }
+        }
     }
 
     func stopHosting() {
@@ -137,7 +155,7 @@ final class Collab {
     func join(_ invite: Invite) {
         leave()
         joinState = .connecting; joinedHost = invite.host
-        let c = NWConnection(host: NWEndpoint.Host(invite.host), port: NWEndpoint.Port(rawValue: Invite.port)!, using: .tcp)
+        let c = NWConnection(host: NWEndpoint.Host(invite.host), port: NWEndpoint.Port(rawValue: invite.port)!, using: .tcp)
         let conn = Conn(c); upstream = conn
         c.stateUpdateHandler = { [weak self] st in MainActor.assumeIsolated {
             switch st {

@@ -53,18 +53,24 @@ public struct TailscaleStatus: Equatable, Sendable {
     }
 }
 
-/// An invite is a link that names the host and the workspace. It carries no secret: the host still approves each person.
+/// An invite is a link that names the host, its port and the workspace. It carries no secret: the host still approves each person.
 public struct Invite: Equatable, Sendable {
-    public static let port: UInt16 = 47821
+    public static let defaultPort: UInt16 = 47931          // hosting tries this and the next nine if something else holds it
     public var host: String
+    public var port: UInt16
     public var workspace: String
-    public var url: String { "antsly://join/\(host)/\(workspace.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? workspace)" }
-    public init(host: String, workspace: String) { self.host = host; self.workspace = workspace }
+    public var url: String {
+        "antsly://join/\(host):\(port)/\(workspace.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? workspace)"
+    }
+    public init(host: String, port: UInt16 = Invite.defaultPort, workspace: String) { self.host = host; self.port = port; self.workspace = workspace }
     public static func parse(_ s: String) -> Invite? {
         guard let u = URL(string: s.trimmingCharacters(in: .whitespacesAndNewlines)), u.scheme == "antsly", u.host == "join" else { return nil }
         let parts = u.path.split(separator: "/").map(String.init)
-        guard parts.count >= 1, !parts[0].isEmpty else { return nil }
-        return Invite(host: parts[0], workspace: parts.count > 1 ? (parts[1].removingPercentEncoding ?? parts[1]) : "Antsly")
+        guard let first = parts.first, !first.isEmpty else { return nil }
+        var host = first, port = defaultPort
+        if let i = first.lastIndex(of: ":"), let p = UInt16(first[first.index(after: i)...]) { host = String(first[..<i]); port = p }
+        guard !host.isEmpty else { return nil }
+        return Invite(host: host, port: port, workspace: parts.count > 1 ? (parts[1].removingPercentEncoding ?? parts[1]) : "Antsly")
     }
 }
 

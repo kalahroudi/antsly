@@ -16,6 +16,36 @@ final class Nav {
     static let shared = Nav()
     var pane: Pane = .workspace
     var planTab: PlanView.Tab = .timeline
+
+    // Back and forward through where you have been: mouse buttons 4 and 5, Cmd-[ and Cmd-], and the chevrons in the sidebar.
+    struct Place: Equatable { var pane: Pane; var item: WorkspaceModel.Item? }
+    private(set) var history: [Place] = []
+    private(set) var index = -1
+    @ObservationIgnored private var moving = false
+    var canGoBack: Bool { index > 0 }
+    var canGoForward: Bool { index >= 0 && index < history.count - 1 }
+
+    /// Called whenever the pane or the selection changes.
+    func record() {
+        guard !moving else { return }
+        let here = Place(pane: pane, item: pane == .workspace ? WorkspaceModel.shared.selected : nil)
+        if index >= 0, history[index] == here { return }
+        history = Array(history.prefix(index + 1)) + [here]
+        if history.count > 100 { history.removeFirst() }
+        index = history.count - 1
+    }
+    func back() { step(-1) }
+    func forward() { step(1) }
+    private func step(_ d: Int) {
+        var i = index + d
+        // Skip places whose page, database or plan has since been deleted.
+        while history.indices.contains(i), let it = history[i].item, !WorkspaceModel.shared.exists(it) { i += d }
+        guard history.indices.contains(i) else { return }
+        moving = true; index = i
+        pane = history[i].pane
+        if let it = history[i].item { WorkspaceModel.shared.selected = it }
+        moving = false
+    }
 }
 
 /// The Manager window: a fixed sidebar (collapsible to icons) and a main pane that uses the full width.
@@ -40,7 +70,9 @@ struct ManagerView: View {
         }
         .ignoresSafeArea(.container, edges: .top)
         .frame(minWidth: 900, minHeight: 620)
-        .onAppear { model.setManagerVisible(true) }
+        .onAppear { model.setManagerVisible(true); nav.record() }
+        .onChange(of: nav.pane) { _, _ in nav.record() }
+        .onChange(of: ws.selected) { _, _ in nav.record() }
     }
 
     @ViewBuilder private var detail: some View {
@@ -87,8 +119,12 @@ struct Sidebar: View {
     var body: some View {
         @Bindable var w = ws
         VStack(alignment: .leading, spacing: 2) {
-            HStack {
+            HStack(spacing: 4) {
                 if !collapsed {
+                    Button { nav.back() } label: { Image(systemName: "chevron.left").frame(width: 22, height: 24).contentShape(Rectangle()) }
+                        .buttonStyle(.plain).foregroundStyle(nav.canGoBack ? Color.primary : Color.secondary.opacity(0.4)).disabled(!nav.canGoBack).help("Back").accessibilityLabel("Back")
+                    Button { nav.forward() } label: { Image(systemName: "chevron.right").frame(width: 22, height: 24).contentShape(Rectangle()) }
+                        .buttonStyle(.plain).foregroundStyle(nav.canGoForward ? Color.primary : Color.secondary.opacity(0.4)).disabled(!nav.canGoForward).help("Forward").accessibilityLabel("Forward")
                     Menu {
                         Button("New page", systemImage: "doc.badge.plus") { ws.newPage(); nav.pane = .workspace }
                         Button("New database", systemImage: "tablecells.badge.ellipsis") { ws.newDatabase(); nav.pane = .workspace }

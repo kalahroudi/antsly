@@ -17,6 +17,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
     func applicationDidFinishLaunching(_ notification: Notification) {
         if SnapshotMode.dir != nil { SnapshotMode.run(); return }
         WorkspaceModel.shared.load()
+        if Prefs.shared.liveCollab { Collab.shared.startHosting(); Task { await Collab.shared.refreshStatus() } }
+        installMouseButtons()
         Prefs.shared.applyTheme()
         Prefs.shared.applyDockIcon()
         NSApp.applicationIconImage = AppIcon.image(size: 512, padded: true)
@@ -115,6 +117,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
     // The app lives in the menu bar: closing the last window must not quit it.
     func applicationDidResignActive(_ notification: Notification) { WorkspaceModel.shared.flush() }
     func applicationWillTerminate(_ notification: Notification) { WorkspaceModel.shared.flush(); Collab.shared.stopHosting() }
+    // MARK: Undo, redo, back, forward
+
+    @objc func undoAction() { WorkspaceModel.shared.undo() }
+    @objc func redoAction() { WorkspaceModel.shared.redo() }
+    @objc func goBack() { Nav.shared.back() }
+    @objc func goForward() { Nav.shared.forward() }
+
+    func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        switch item.action {
+        case #selector(undoAction): return WorkspaceModel.shared.canUndo
+        case #selector(redoAction): return WorkspaceModel.shared.canRedo
+        case #selector(goBack): return Nav.shared.canGoBack
+        case #selector(goForward): return Nav.shared.canGoForward
+        default: return true
+        }
+    }
+
+    /// Side buttons on a mouse: button 4 is back, button 5 is forward. Only acts while the Manager window is in front.
+    private func installMouseButtons() {
+        NSEvent.addLocalMonitorForEvents(matching: .otherMouseDown) { [weak self] e in
+            guard let self, e.window === self.managerWindow else { return e }
+            switch e.buttonNumber {
+            case 3: Nav.shared.back(); return nil
+            case 4: Nav.shared.forward(); return nil
+            default: return e
+            }
+        }
+    }
+
     @objc func newPage() { showManager(pane: .workspace); WorkspaceModel.shared.newPage() }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
