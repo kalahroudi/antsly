@@ -34,7 +34,7 @@ struct PlanView: View {
                     PaneHeader(title: "", subtitle: nil, trailing: { controls }, tabs: { EmptyView() })
                         .overlay(alignment: .leading) {
                             TextField("Plan name", text: Binding(get: { plan.title }, set: { v in ws.editPlan(id) { $0.title = v } })).textFieldStyle(.plain)
-                                .font(.system(size: 19, weight: .semibold)).padding(.leading, 22).padding(.top, 26).padding(.trailing, 560)
+                                .font(.system(size: 19, weight: .semibold)).padding(.leading, 22).padding(.top, 26).padding(.trailing, 420)
                         }
                     switch nav.planTab {
                     case .timeline: Timeline(plan: plan, edit: { editing = $0 })
@@ -57,9 +57,12 @@ struct PlanView: View {
     @ViewBuilder private var controls: some View {
         HStack(spacing: 8) {
             Segmented(options: [(Tab.timeline, "Timeline"), (Tab.list, "List"), (Tab.workload, "Workload"), (Tab.report, "Report")], selection: Binding(get: { nav.planTab }, set: { nav.planTab = $0 }))
-            Button { showPeople = true } label: { Label("People", systemImage: "person.2") }.buttonStyle(Pill())
-            Button { addPhase() } label: { Label("Phase", systemImage: "plus") }.buttonStyle(Pill())
-            Button { addTask() } label: { Label("Task", systemImage: "plus") }.buttonStyle(Pill(kind: .primary))
+            Button { showPeople = true } label: { Image(systemName: "person.2") }.buttonStyle(Pill()).help("People and capacity").accessibilityLabel("People")
+            Menu {
+                Button("New task") { addTask() }
+                Button("New phase") { addPhase() }
+            } label: { Label("Add", systemImage: "plus") }
+                .menuStyle(.button).buttonStyle(Pill(kind: .primary)).menuIndicator(.hidden).fixedSize()
         }
     }
 
