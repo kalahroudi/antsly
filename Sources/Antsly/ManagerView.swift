@@ -116,8 +116,24 @@ struct Sidebar: View {
     let ws = WorkspaceModel.shared
     let collab = Collab.shared
     var collapsed: Bool { prefs.sidebarCollapsed }
+    @State private var pendingDelete: WorkspaceModel.Item?
+
+    private func name(of item: WorkspaceModel.Item) -> String {
+        switch item {
+        case .page(let id): ws.page(id)?.title ?? "this page"
+        case .database(let id): ws.databases.first { $0.id == id }?.title ?? "this database"
+        case .plan(let id): ws.plans.first { $0.id == id }?.title ?? "this plan"
+        }
+    }
 
     var body: some View {
+        content.confirmationDialog("Delete \(pendingDelete.map(name(of:)) ?? "")?", isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }), titleVisibility: .visible) {
+            Button("Delete", role: .destructive) { if let i = pendingDelete { ws.delete(i) }; pendingDelete = nil }
+            Button("Cancel", role: .cancel) { pendingDelete = nil }
+        } message: { Text("You can undo this with Edit, Undo.") }
+    }
+
+    @ViewBuilder private var content: some View {
         @Bindable var w = ws
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 4) {
@@ -194,7 +210,7 @@ struct Sidebar: View {
             .contentShape(RoundedRectangle(cornerRadius: 7))   // whole row, including padding, is the click target
         }
         .buttonStyle(.plain).help(title).accessibilityLabel(title)
-        .contextMenu { Button("Delete", role: .destructive) { ws.delete(item) } }
+        .contextMenu { Button("Delete…", role: .destructive) { pendingDelete = item } }
     }
 
     private func item(_ p: Pane) -> some View {

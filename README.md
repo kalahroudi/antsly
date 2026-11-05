@@ -24,7 +24,7 @@ Never call a destructive tool without asking me first.
 ## What it does
 
 - **Pages**: a block editor with text, headings, to-dos, bullets, callouts and code. Type `/` to change a block. Pages are Markdown files.
-- **Databases**: table and board views. Rows are JSON files.
+- **Databases**: table and board views with typed columns (status, choice, date, person, number, checkbox, link), group edit and delete, and one-click prompts for your AI agent. Rows are JSON files.
 - **Project plans**: phases and tasks on a timeline, per-person allocation and capacity, a resource heatmap by day, week, month or year, a burnup chart (person-days, story points or tasks), a critical path and one-click status reports as a page, Markdown or PDF. Imports a Gantt Magic backup.
 - **Version history**: git under the hood. See what changed, restore a page, resolve a conflict by picking a side. No command line.
 - **GitHub issues**: pulled into a database and pushed back through your own `gh` sign-in. Antsly never sees a password.

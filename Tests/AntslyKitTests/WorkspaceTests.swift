@@ -150,4 +150,47 @@ final class UndoTests: XCTestCase {
         while let s = h.undo(current: cur) { cur = s; n += 1 }
         XCTAssertEqual(n, 3)
     }
+
+    // MARK: Database columns, group actions, agent prompts
+
+    func testOldColumnsInferTheirKind() throws {
+        let json = #"{"id":"d","title":"T","columns":[{"id":"status","name":"Status"},{"id":"owner","name":"Owner"},{"id":"due","name":"Due"},{"id":"x","name":"X"}],"rows":[]}"#
+        let db = try JSONDecoder().decode(Database.self, from: Data(json.utf8))
+        XCTAssertEqual(db.columns.map(\.kind), [.status, .person, .date, .text])
+        XCTAssertEqual(db.columns[0].options, ColumnKind.status.defaultOptions)
+    }
+
+    func testColumnKindRoundTrips() throws {
+        var db = Database.tasks(); db.columns[1] = .init(id: "status", name: "Stage", kind: .select, options: ["A", "B"])
+        let back = try JSONDecoder().decode(Database.self, from: JSONEncoder().encode(db))
+        XCTAssertEqual(back, db)
+    }
+
+    func testGroupDeleteAndUpdate() {
+        var db = Database.tasks()
+        db.rows = (1...4).map { Database.Row(id: "r\($0)", cells: ["name": "T\($0)", "status": "Not started"]) }
+        db.setCells(["r1", "r3"], column: "status", to: "Done")
+        XCTAssertEqual(db.rows.map { $0.cells["status"] ?? "" }, ["Done", "Not started", "Done", "Not started"])
+        db.removeRows(["r2", "r3"])
+        XCTAssertEqual(db.rows.map(\.id), ["r1", "r4"])
+    }
+
+    func testChoicesIncludeValuesAlreadyUsed() {
+        var db = Database.tasks(); db.rows = [.init(cells: ["owner": "Sam"])]
+        db.columns[2].options = ["Ana"]
+        XCTAssertEqual(db.choices(for: db.columns[2]), ["Ana", "Sam"])
+    }
+
+    func testStatusToneAndDates() {
+        XCTAssertEqual(StatusTone.of("Done"), .done); XCTAssertEqual(StatusTone.of("Blocked"), .blocked)
+        XCTAssertEqual(StatusTone.of("In progress"), .active); XCTAssertEqual(StatusTone.of("Later"), .neutral)
+        XCTAssertEqual(CellDate.format(CellDate.parse("2026-11-05")!), "2026-11-05"); XCTAssertNil(CellDate.parse("soon"))
+    }
+
+    func testAgentPromptNamesOnlyThePickedRows() {
+        var db = Database.tasks(); db.rows = [.init(id: "a", cells: ["name": "Fix login"]), .init(id: "b", cells: ["name": "Other"])]
+        let p = AgentTask.fix.prompt(for: db, rows: [db.rows[0]], file: "databases/x.json")
+        XCTAssertTrue(p.contains("Fix login")); XCTAssertFalse(p.contains("Other")); XCTAssertTrue(p.contains("databases/x.json"))
+        XCTAssertTrue(AgentTask.stylePrompt(for: db, file: "f").contains("kind"))
+    }
 }

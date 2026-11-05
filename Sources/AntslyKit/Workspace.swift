@@ -86,10 +86,74 @@ public enum PageMarkdown {
     }
 }
 
+/// What a column holds. Cells are always stored as strings so the JSON stays simple and hand-editable:
+/// dates as `yyyy-MM-dd`, checkboxes as "true" or "", everything else as typed.
+public enum ColumnKind: String, Codable, Sendable, CaseIterable {
+    case text, number, status, select, date, person, checkbox, url
+
+    public var label: String {
+        switch self {
+        case .text: "Text"
+        case .number: "Number"
+        case .status: "Status"
+        case .select: "Choice"
+        case .date: "Date"
+        case .person: "Person"
+        case .checkbox: "Checkbox"
+        case .url: "Link"
+        }
+    }
+    /// Columns made before types existed carry no kind. The id of the standard ones says what they are.
+    static func infer(id: String) -> ColumnKind {
+        switch id {
+        case "status": .status
+        case "owner", "assignee": .person
+        case "due", "start", "end", "date": .date
+        default: .text
+        }
+    }
+    public var defaultOptions: [String] { self == .status ? ["Not started", "In progress", "Blocked", "Done"] : [] }
+}
+
+/// How a status label is drawn. Matching is by common words so standard labels get a colour without setup.
+public enum StatusTone: Sendable { case neutral, active, blocked, done
+    public static func of(_ value: String) -> StatusTone {
+        let v = value.lowercased()
+        if v.isEmpty { return .neutral }
+        if ["done", "closed", "complete", "completed", "shipped", "resolved"].contains(where: v.contains) { return .done }
+        if ["block", "stuck", "failed", "cancel"].contains(where: v.contains) { return .blocked }
+        if ["progress", "open", "doing", "review", "active"].contains(where: v.contains) { return .active }
+        return .neutral
+    }
+}
+
+/// Date cells are stored as plain `yyyy-MM-dd` so they sort and diff as text.
+public enum CellDate {
+    private static func formatter() -> DateFormatter {
+        let f = DateFormatter(); f.calendar = Calendar(identifier: .gregorian); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "yyyy-MM-dd"; return f
+    }
+    public static func parse(_ s: String) -> Date? { s.isEmpty ? nil : formatter().date(from: s) }
+    public static func format(_ d: Date) -> String { formatter().string(from: d) }
+}
+
 /// A database: typed columns and rows, stored as JSON next to the pages. Issues from GitHub use the same shape.
 public struct Database: Identifiable, Equatable, Codable, Sendable {
-    public struct Column: Equatable, Codable, Sendable, Identifiable { public var id: String; public var name: String
-        public init(id: String, name: String) { self.id = id; self.name = name } }
+    public struct Column: Equatable, Codable, Sendable, Identifiable {
+        public var id: String
+        public var name: String
+        public var kind: ColumnKind
+        public var options: [String]       // labels for status and choice columns, people for person columns
+        public init(id: String, name: String, kind: ColumnKind? = nil, options: [String]? = nil) {
+            let k = kind ?? ColumnKind.infer(id: id)
+            self.id = id; self.name = name; self.kind = k; self.options = options ?? k.defaultOptions
+        }
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            let id = try c.decode(String.self, forKey: .id)
+            self.init(id: id, name: try c.decode(String.self, forKey: .name), kind: try c.decodeIfPresent(ColumnKind.self, forKey: .kind),
+                      options: try c.decodeIfPresent([String].self, forKey: .options))
+        }
+    }
     public struct Row: Equatable, Codable, Sendable, Identifiable { public var id: String; public var cells: [String: String]
         public init(id: String = UUID().uuidString, cells: [String: String] = [:]) { self.id = id; self.cells = cells } }
     public var id: String
@@ -109,6 +173,70 @@ public struct Database: Identifiable, Equatable, Codable, Sendable {
         var seen: [String] = []
         for r in rows { let v = r.cells[g] ?? ""; if !seen.contains(v) { seen.append(v) } }
         return seen
+    }
+
+    /// The values a status, choice or person cell can take: the configured ones, plus anything already used in the rows.
+    public func choices(for column: Column) -> [String] {
+        var out = column.options
+        for r in rows { let v = r.cells[column.id] ?? ""; if !v.isEmpty, !out.contains(v) { out.append(v) } }
+        return out
+    }
+
+    // Group actions. Both leave rows that are not named untouched.
+    public mutating func removeRows(_ ids: Set<String>) { rows.removeAll { ids.contains($0.id) } }
+    public mutating func setCells(_ ids: Set<String>, column: String, to value: String) {
+        for i in rows.indices where ids.contains(rows[i].id) { rows[i].cells[column] = value }
+    }
+}
+
+/// Ready-made instructions for an AI agent that can use Antsly, built from the rows the user picked.
+/// The user pastes one into their agent; nothing is sent from the app.
+public enum AgentTask: String, CaseIterable, Sendable, Identifiable {
+    case investigate, fix, schedule, summarize
+    public var id: String { rawValue }
+    public var label: String {
+        switch self {
+        case .investigate: "Investigate"
+        case .fix: "Fix"
+        case .schedule: "Schedule"
+        case .summarize: "Summarize"
+        }
+    }
+    var instruction: String {
+        switch self {
+        case .investigate: "Investigate each item below: find out what is going on, what is blocking it and what the next step is. Write your findings in the Notes column if there is one, otherwise report them back to me."
+        case .fix: "Fix each item below if it is something you can do in this project. Make the change, then set its status to Done. Tell me what you changed and anything you could not do."
+        case .schedule: "Suggest a realistic order and due date for each item below, based on its status and anything blocking it. Fill the due date column with dates as yyyy-MM-dd and explain your reasoning briefly."
+        case .summarize: "Summarize the items below in a few sentences: what is done, what is in progress, what is stuck. Do not change anything."
+        }
+    }
+
+    public func prompt(for db: Database, rows: [Database.Row], file: String) -> String {
+        let header = db.columns.map(\.name).joined(separator: " | ")
+        let lines = rows.map { r in db.columns.map { r.cells[$0.id] ?? "" }.joined(separator: " | ") }
+        return """
+        \(instruction)
+
+        Database "\(db.title)" (\(file)). Columns: \(header)
+
+        \(lines.joined(separator: "\n"))
+
+        The database is a plain JSON file. Edit rows by id only: \(rows.map(\.id).joined(separator: ", ")). Keep every other row as it is, and never delete a row.
+        """
+    }
+
+    public static func stylePrompt(for db: Database, file: String) -> String {
+        let cols = db.columns.map { "\($0.id) (\($0.name), \($0.kind.rawValue))" }.joined(separator: ", ")
+        let sample = db.rows.prefix(15).map { r in db.columns.map { r.cells[$0.id] ?? "" }.joined(separator: " | ") }.joined(separator: "\n")
+        return """
+        Improve how the database "\(db.title)" looks and reads, by editing its column settings in \(file). Do not change any row.
+        For each column choose a "kind" from: \(ColumnKind.allCases.map(\.rawValue).joined(separator: ", ")). For status, choice and person columns set "options" to a sensible list of labels or people, in the order they should appear. Rename columns only if the new name is clearly clearer. Put the most important columns first.
+
+        Columns now: \(cols)
+
+        First rows:
+        \(sample)
+        """
     }
 }
 

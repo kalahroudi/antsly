@@ -24,8 +24,8 @@ public enum GitHubIssues {
     }
 
     public static func database(repo: String, issues: [Issue], existing: Database? = nil) -> Database {
-        var db = existing ?? Database(title: "Issues", columns: [.init(id: "number", name: "#"), .init(id: "name", name: "Issue"), .init(id: "status", name: "Status"),
-                                                                 .init(id: "owner", name: "Assignee"), .init(id: "labels", name: "Labels")], groupBy: "status", source: "github:\(repo)")
+        var db = existing ?? Database(title: "Issues", columns: [.init(id: "number", name: "#"), .init(id: "name", name: "Issue"), .init(id: "status", name: "Status", kind: .status, options: ["Open", "Closed"]),
+                                                                 .init(id: "owner", name: "Assignee", kind: .text), .init(id: "labels", name: "Labels")], groupBy: "status", source: "github:\(repo)")
         db.rows = issues.map { i in
             Database.Row(id: "gh-\(i.number)", cells: ["number": "\(i.number)", "name": i.title, "status": i.state == "open" ? "Open" : "Closed", "owner": i.assignee, "labels": i.labels.joined(separator: ", ")])
         }

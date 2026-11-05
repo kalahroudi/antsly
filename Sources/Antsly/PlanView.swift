@@ -211,6 +211,7 @@ struct TaskEditor: View {
     let planID: String, taskID: String
     var close: () -> Void
     let ws = WorkspaceModel.shared
+    @State private var confirmDelete = false
 
     private var plan: Plan? { ws.plans.first { $0.id == planID } }
     private var task: Plan.Task? { plan?.tasks.first { $0.id == taskID } }
@@ -240,7 +241,11 @@ struct TaskEditor: View {
                     }
                 }
                 Spacer()
-                Button(role: .destructive) { ws.editPlan(planID) { $0.tasks.removeAll { $0.id == taskID } }; close() } label: { Label("Delete task", systemImage: "trash") }.buttonStyle(Pill(kind: .danger))
+                Button(role: .destructive) { confirmDelete = true } label: { Label("Delete task", systemImage: "trash") }.buttonStyle(Pill(kind: .danger))
+                    .confirmationDialog("Delete \"\(t.name)\"?", isPresented: $confirmDelete, titleVisibility: .visible) {
+                        Button("Delete", role: .destructive) { ws.editPlan(planID) { $0.tasks.removeAll { $0.id == taskID } }; close() }
+                        Button("Cancel", role: .cancel) {}
+                    }
             }
             .padding(18).frame(width: 360).frame(maxHeight: .infinity, alignment: .top).background(Theme.pane)
             .overlay(alignment: .leading) { Divider() }
@@ -252,6 +257,7 @@ struct PeopleSheet: View {
     let planID: String
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
+    @State private var removing: Plan.Person?
     let ws = WorkspaceModel.shared
     private var plan: Plan? { ws.plans.first { $0.id == planID } }
 
@@ -263,7 +269,7 @@ struct PeopleSheet: View {
                 HStack {
                     Text(p.name).frame(maxWidth: .infinity, alignment: .leading)
                     Stepper("\(String(format: "%.1f", p.daysPerWeek)) days/week", value: Binding(get: { p.daysPerWeek }, set: { v in ws.editPlan(planID) { pl in if let i = pl.people.firstIndex(where: { $0.id == p.id }) { pl.people[i].daysPerWeek = v } } }), in: 0.5...7, step: 0.5)
-                    Button(role: .destructive) { ws.editPlan(planID) { pl in pl.people.removeAll { $0.id == p.id }; for i in pl.tasks.indices { pl.tasks[i].assignments.removeAll { $0.personID == p.id } } } } label: { Image(systemName: "trash").frame(width: 24, height: 24).contentShape(Rectangle()) }.buttonStyle(.plain).accessibilityLabel("Remove \(p.name)")
+                    Button(role: .destructive) { removing = p } label: { Image(systemName: "trash").frame(width: 24, height: 24).contentShape(Rectangle()) }.buttonStyle(.plain).accessibilityLabel("Remove \(p.name)")
                 }
             }
             HStack { TextField("Add a person", text: $name).textFieldStyle(.roundedBorder).onSubmit(add); Button("Add", action: add).buttonStyle(Pill(kind: .primary)) }
@@ -273,6 +279,10 @@ struct PeopleSheet: View {
             }
             HStack { Spacer(); Button("Done") { dismiss() }.buttonStyle(Pill(kind: .primary)) }
         }.padding(20).frame(width: 520)
+        .confirmationDialog("Remove \(removing?.name ?? "")?", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }), titleVisibility: .visible) {
+            Button("Remove", role: .destructive) { if let p = removing { ws.editPlan(planID) { pl in pl.people.removeAll { $0.id == p.id }; for i in pl.tasks.indices { pl.tasks[i].assignments.removeAll { $0.personID == p.id } } } }; removing = nil }
+            Button("Cancel", role: .cancel) { removing = nil }
+        } message: { Text("They are taken off every task they were assigned to.") }
     }
     private func add() {
         let n = name.trimmingCharacters(in: .whitespaces); guard !n.isEmpty else { return }
@@ -285,6 +295,7 @@ struct PhaseLabel: View {
     let phase: Plan.Phase
     let taskCount: Int
     @State private var open = false
+    @State private var confirmDelete = false
     let ws = WorkspaceModel.shared
     private let palette = ["#2563EB", "#D97706", "#059669", "#DC2626", "#7C3AED", "#6B7280"]
 
@@ -309,14 +320,19 @@ struct PhaseLabel: View {
                         }
                         Divider()
                         Button(role: .destructive) {
-                            open = false
-                            ws.editPlan(planID) { p in p.phases.removeAll { $0.id == phase.id }; p.tasks.removeAll { $0.phaseID == phase.id } }
+                            open = false; confirmDelete = true
                         } label: { Text("Delete phase" + (taskCount > 0 ? " and its \(taskCount) task\(taskCount == 1 ? "" : "s")" : "")).foregroundStyle(Theme.danger) }
                             .buttonStyle(.plain)
                     }.padding(14)
                 }
             TextField("Phase name", text: Binding(get: { phase.name }, set: { v in edit { $0.name = v } }))
                 .textFieldStyle(.plain).font(.system(size: 12.5, weight: .semibold)).lineLimit(1)
+        }
+        .confirmationDialog("Delete \"\(phase.name)\"?", isPresented: $confirmDelete, titleVisibility: .visible) {
+            Button("Delete" + (taskCount > 0 ? " phase and \(taskCount) task\(taskCount == 1 ? "" : "s")" : ""), role: .destructive) {
+                ws.editPlan(planID) { p in p.phases.removeAll { $0.id == phase.id }; p.tasks.removeAll { $0.phaseID == phase.id } }
+            }
+            Button("Cancel", role: .cancel) {}
         }
     }
 }

@@ -75,6 +75,7 @@ struct BlockRow: View {
     let ws = WorkspaceModel.shared
     let collab = Collab.shared
     @State private var hover = false
+    @State private var confirmDelete = false
 
     private var block: Block? { ws.page(pageID)?.blocks.first { $0.id == blockID } }
     private var slash: Bool { (block?.text ?? "").hasPrefix("/") }
@@ -126,9 +127,13 @@ struct BlockRow: View {
         Menu {
             ForEach(Block.Kind.allCases, id: \.self) { k in Button(label(k)) { setKind(k) } }
             Divider()
-            Button("Delete block", role: .destructive) { remove() }
+            Button("Delete block…", role: .destructive) { confirmDelete = true }
         } label: { Image(systemName: "line.3.horizontal").font(.system(size: 11)).foregroundStyle(.secondary).frame(width: 18, height: 22).contentShape(Rectangle()) }
             .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().opacity(hover && !readOnly ? 1 : 0).help("Change block type")
+            .confirmationDialog("Delete this block?", isPresented: $confirmDelete, titleVisibility: .visible) {
+                Button("Delete", role: .destructive) { remove() }
+                Button("Cancel", role: .cancel) {}
+            }
     }
 
     private func slashMenu(_ b: Block) -> some View {
