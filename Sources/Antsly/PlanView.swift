@@ -163,22 +163,7 @@ struct Timeline: View {
     }
 
     /// A phase's name is edited in place. The dot opens colour and delete.
-    private func phaseLabel(_ ph: Plan.Phase) -> some View {
-        let palette = ["#2563EB", "#D97706", "#059669", "#DC2626", "#7C3AED", "#6B7280"]
-        let count = plan.tasks.filter { $0.phaseID == ph.id }.count
-        return HStack(spacing: 6) {
-            Menu {
-                ForEach(palette, id: \.self) { c in Button { ws.editPlan(plan.id) { p in if let i = p.phases.firstIndex(where: { $0.id == ph.id }) { p.phases[i].color = c } } } label: { Label(c == ph.color ? "Current colour" : "Colour", systemImage: "circle.fill") }.tint(Color(hex: c)) }
-                Divider()
-                Button("Delete phase\(count > 0 ? " and its \(count) task\(count == 1 ? "" : "s")" : "")", role: .destructive) {
-                    ws.editPlan(plan.id) { p in p.phases.removeAll { $0.id == ph.id }; p.tasks.removeAll { $0.phaseID == ph.id } }
-                }
-            } label: { Circle().fill(Color(hex: ph.color)).frame(width: 10, height: 10).frame(width: 20, height: 24).contentShape(Rectangle()) }
-                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help("Phase colour and delete")
-            TextField("Phase name", text: Binding(get: { ph.name }, set: { v in ws.editPlan(plan.id) { p in if let i = p.phases.firstIndex(where: { $0.id == ph.id }) { p.phases[i].name = v } } }))
-                .textFieldStyle(.plain).font(.system(size: 12.5, weight: .semibold)).lineLimit(1)
-        }
-    }
+    private func phaseLabel(_ ph: Plan.Phase) -> some View { PhaseLabel(planID: plan.id, phase: ph, taskCount: plan.tasks.filter { $0.phaseID == ph.id }.count) }
 
     private func owners(_ t: Plan.Task) -> String {
         let names = t.assignments.compactMap { a in plan.people.first { $0.id == a.personID }?.name }
@@ -292,5 +277,46 @@ struct PeopleSheet: View {
     private func add() {
         let n = name.trimmingCharacters(in: .whitespaces); guard !n.isEmpty else { return }
         ws.editPlan(planID) { $0.people.append(.init(name: n)) }; name = ""
+    }
+}
+
+struct PhaseLabel: View {
+    let planID: String
+    let phase: Plan.Phase
+    let taskCount: Int
+    @State private var open = false
+    let ws = WorkspaceModel.shared
+    private let palette = ["#2563EB", "#D97706", "#059669", "#DC2626", "#7C3AED", "#6B7280"]
+
+    private func edit(_ change: @escaping (inout Plan.Phase) -> Void) {
+        ws.editPlan(planID) { p in if let i = p.phases.firstIndex(where: { $0.id == phase.id }) { change(&p.phases[i]) } }
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Button { open = true } label: { Circle().fill(Color(hex: phase.color)).frame(width: 10, height: 10).frame(width: 20, height: 24).contentShape(Rectangle()) }
+                .buttonStyle(.plain).help("Phase colour and delete").accessibilityLabel("Phase options")
+                .popover(isPresented: $open, arrowEdge: .bottom) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Colour").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                        HStack(spacing: 8) {
+                            ForEach(palette, id: \.self) { c in
+                                Button { edit { $0.color = c } } label: {
+                                    Circle().fill(Color(hex: c)).frame(width: 20, height: 20)
+                                        .overlay(Circle().stroke(Color.primary, lineWidth: c == phase.color ? 2 : 0).padding(-3))
+                                }.buttonStyle(.plain).accessibilityLabel("Colour \(c)")
+                            }
+                        }
+                        Divider()
+                        Button(role: .destructive) {
+                            open = false
+                            ws.editPlan(planID) { p in p.phases.removeAll { $0.id == phase.id }; p.tasks.removeAll { $0.phaseID == phase.id } }
+                        } label: { Text("Delete phase" + (taskCount > 0 ? " and its \(taskCount) task\(taskCount == 1 ? "" : "s")" : "")).foregroundStyle(Theme.danger) }
+                            .buttonStyle(.plain)
+                    }.padding(14)
+                }
+            TextField("Phase name", text: Binding(get: { phase.name }, set: { v in edit { $0.name = v } }))
+                .textFieldStyle(.plain).font(.system(size: 12.5, weight: .semibold)).lineLimit(1)
+        }
     }
 }
