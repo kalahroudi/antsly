@@ -174,7 +174,7 @@ public enum PlanMath {
         if !r.criticalPath.isEmpty { s += "\n## Critical path\n\n" + r.criticalPath.joined(separator: " → ") + "\n" }
         if !r.overloaded.isEmpty { s += "\n## Overloaded next quarter\n\n" + r.overloaded.joined(separator: ", ") + "\n" }
         if !r.upcoming.isEmpty { s += "\n## Starting soon\n\n" + r.upcoming.map { "- \($0)" }.joined(separator: "\n") + "\n" }
-        return s
+        return s + allocationMarkdown(plan)
     }
 }
 
@@ -217,5 +217,84 @@ extension PlanMath {
         if let last = plan.snapshots.map(\.date).max(), cal.startOfDay(for: last) == cal.startOfDay(for: now) { return plan }
         guard !plan.tasks.isEmpty else { return plan }
         return snapshot(plan, now: now)
+    }
+}
+
+/// Who does how much of the plan, by phase and task, in person-days. Feeds the report's Resources view and its Markdown.
+public struct Allocation: Equatable, Sendable {
+    public struct Share: Equatable, Sendable { public var name: String; public var days: Double }
+    public struct TaskRow: Equatable, Sendable, Identifiable {
+        public var id: String; public var name: String
+        public var people: [Share]
+        public var daysPerWeek: Double          // the largest allocation on the task; people may differ
+        public var personDays: Double; public var share: Double
+    }
+    public struct PhaseRow: Equatable, Sendable, Identifiable {
+        public var id: String; public var name: String; public var color: String
+        public var people: [Share]; public var tasks: [TaskRow]
+        public var personDays: Double; public var share: Double
+        /// People booked over 100% at some point while this phase runs, with their peak percentage.
+        public var overloaded: [Share]
+    }
+    public var phases: [PhaseRow]
+    public var total: Double
+    public var people: [String]
+    public var matrix: [String: [String: Double]]     // person name -> phase id -> person-days
+    public var top: Share?
+    public var peopleCount: Int { people.count }
+}
+
+extension PlanMath {
+    public static func allocation(_ plan: Plan) -> Allocation {
+        let names = Dictionary(uniqueKeysWithValues: plan.people.map { ($0.id, $0.name) })
+        func name(_ id: String) -> String { names[id] ?? id }
+        let total = plan.tasks.reduce(0) { $0 + effort($1) }
+        var matrix: [String: [String: Double]] = [:]
+        var perPerson: [String: Double] = [:]
+        let phases: [Allocation.PhaseRow] = plan.phases.map { ph in
+            let ts = plan.tasks.filter { $0.phaseID == ph.id }
+            var byPerson: [String: Double] = [:]
+            let rows: [Allocation.TaskRow] = ts.map { t in
+                let weeks = t.end.timeIntervalSince(t.start) / day / 7
+                let shares = t.assignments.map { Allocation.Share(name: name($0.personID), days: $0.daysPerWeek * weeks) }
+                for s in shares { byPerson[s.name, default: 0] += s.days; perPerson[s.name, default: 0] += s.days; matrix[s.name, default: [:]][ph.id, default: 0] += s.days }
+                let e = effort(t)
+                return Allocation.TaskRow(id: t.id, name: t.name, people: shares.sorted { $0.days > $1.days }, daysPerWeek: t.assignments.map(\.daysPerWeek).max() ?? 0,
+                                          personDays: e, share: total > 0 ? e / total : 0)
+            }
+            let pd = rows.reduce(0) { $0 + $1.personDays }
+            var over: [Allocation.Share] = []
+            if let a = ts.map(\.start).min(), let b = ts.map(\.end).max() {
+                for p in plan.people where byPerson[p.name] != nil {
+                    // Peak over the phase's quarters, so a short crunch is not averaged away.
+                    var peak = 0.0, d = a
+                    let step: TimeInterval = day * 30
+                    while d < b { peak = max(peak, utilization(person: p, in: plan, from: d, to: min(b, d.addingTimeInterval(step)))); d = d.addingTimeInterval(step) }
+                    if peak > 1.0001 { over.append(.init(name: p.name, days: (peak * 100).rounded())) }
+                }
+            }
+            return Allocation.PhaseRow(id: ph.id, name: ph.name, color: ph.color, people: byPerson.map { Allocation.Share(name: $0.key, days: $0.value) }.sorted { $0.days > $1.days },
+                                       tasks: rows, personDays: pd, share: total > 0 ? pd / total : 0, overloaded: over.sorted { $0.days > $1.days })
+        }
+        let top = perPerson.max { $0.value < $1.value }.map { Allocation.Share(name: $0.key, days: $0.value) }
+        return Allocation(phases: phases, total: total, people: plan.people.map(\.name).filter { perPerson[$0] != nil }, matrix: matrix, top: top)
+    }
+
+    static func fmtDays(_ v: Double) -> String { v >= 100 ? String(Int(v.rounded())) : String(format: "%.1f", v) }
+
+    /// The Resources section of a report as Markdown tables.
+    public static func allocationMarkdown(_ plan: Plan) -> String {
+        let a = allocation(plan)
+        guard a.total > 0 else { return "" }
+        var s = "\n## Resource allocation\n\n\(fmtDays(a.total)) person-days across \(a.peopleCount) people.\n\n| Phase | Person-days | Share | People |\n|---|---:|---:|---|\n"
+        for p in a.phases { s += "| \(p.name) | \(fmtDays(p.personDays)) | \(Int((p.share * 100).rounded()))% | \(p.people.prefix(4).map { "\($0.name) \(fmtDays($0.days))" }.joined(separator: ", ")) |\n" }
+        let flags = a.phases.filter { !$0.overloaded.isEmpty }
+        if !flags.isEmpty { s += "\nOver capacity:\n\n" + flags.flatMap { p in p.overloaded.map { "- \($0.name) reaches \(Int($0.days))% during \(p.name)" } }.joined(separator: "\n") + "\n" }
+        s += "\n### By person and phase (person-days)\n\n| Person | " + a.phases.map(\.name).joined(separator: " | ") + " | Total |\n|---|" + String(repeating: "---:|", count: a.phases.count + 1) + "\n"
+        for n in a.people {
+            let row = a.phases.map { a.matrix[n]?[$0.id] ?? 0 }
+            s += "| \(n) | " + row.map { $0 == 0 ? "" : fmtDays($0) }.joined(separator: " | ") + " | \(fmtDays(row.reduce(0, +))) |\n"
+        }
+        return s
     }
 }

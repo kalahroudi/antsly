@@ -16,6 +16,7 @@ final class Nav {
     static let shared = Nav()
     var pane: Pane = .workspace
     var planTab: PlanView.Tab = .timeline
+    var reportResources = false      // screenshots only: open the report on its Resources view
 
     // Back and forward through where you have been: mouse buttons 4 and 5, Cmd-[ and Cmd-], and the chevrons in the sidebar.
     struct Place: Equatable { var pane: Pane; var item: WorkspaceModel.Item? }

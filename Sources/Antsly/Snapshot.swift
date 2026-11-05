@@ -34,12 +34,12 @@ enum SnapshotMode {
         }
         func page(dark: Bool = false) -> Shot { Shot(name: "page\(dark ? "-dark" : "")", dark: dark, size: CGSize(width: 1240, height: 800)) { WorkspaceModel.shared.selected = .page("launch"); Nav.shared.pane = .workspace; return AnyView(ManagerView()) } }
         func db() -> Shot { Shot(name: "database", dark: false, size: CGSize(width: 1240, height: 800)) { WorkspaceModel.shared.selected = .database(WorkspaceModel.shared.databases[0].id); Nav.shared.pane = .workspace; return AnyView(ManagerView()) } }
-        func plan(_ tab: PlanView.Tab, _ name: String, dark: Bool = false) -> Shot {
+        func plan(_ tab: PlanView.Tab, _ name: String, dark: Bool = false, resources: Bool = false) -> Shot {
             Shot(name: "plan-\(name)\(dark ? "-dark" : "")", dark: dark, size: CGSize(width: 1240, height: 800)) {
-                WorkspaceModel.shared.selected = .plan(WorkspaceModel.shared.plans[0].id); Nav.shared.pane = .workspace; Nav.shared.planTab = tab; return AnyView(ManagerView()) }
+                WorkspaceModel.shared.selected = .plan(WorkspaceModel.shared.plans[0].id); Nav.shared.pane = .workspace; Nav.shared.planTab = tab; Nav.shared.reportResources = resources; return AnyView(ManagerView()) }
         }
         func share() -> Shot { Shot(name: "sharing", dark: false, size: CGSize(width: 1240, height: 800)) { Nav.shared.pane = .sharing; return AnyView(ManagerView()) } }
-        return [page(), page(dark: true), db(), plan(.timeline, "timeline"), plan(.timeline, "timeline", dark: true), plan(.workload, "workload"), plan(.report, "report"), share(), pop(), pop(dark: true), manager(.settings), manager(.help)]
+        return [page(), page(dark: true), db(), plan(.timeline, "timeline"), plan(.timeline, "timeline", dark: true), plan(.workload, "workload"), plan(.report, "report"), plan(.report, "resources", resources: true), share(), pop(), pop(dark: true), manager(.settings), manager(.help)]
     }
 
     @MainActor static func render(_ shot: Shot, to dir: String) async {

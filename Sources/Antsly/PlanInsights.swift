@@ -144,15 +144,19 @@ struct Burnup: View {
     }
 }
 
-/// A status report for the plan: copy as Markdown, save as a page, or export a PDF.
+/// A status report for the plan: a summary, and who does how much. Copy as Markdown, save as a page, or export a PDF.
 struct ReportView: View {
     let plan: Plan
+    @State private var view: V = Nav.shared.reportResources ? .resources : .summary
+    @State private var collapsed = Set<String>()
     let ws = WorkspaceModel.shared
+    enum V: Hashable { case summary, resources }
 
     var body: some View {
         let r = PlanMath.report(plan, now: Date())
         VStack(spacing: 0) {
-            HStack {
+            HStack(spacing: 10) {
+                Segmented(options: [(V.summary, "Summary"), (.resources, "Resources")], selection: $view)
                 Text("Generated \(Date().formatted(date: .abbreviated, time: .omitted))").font(.system(size: 12)).foregroundStyle(.secondary)
                 Spacer()
                 Button("Copy Markdown") { Clipboard.copy(PlanMath.markdown(plan, report: r, now: Date())); AppModel.shared.show("Report copied.") }.buttonStyle(Pill())
@@ -160,7 +164,10 @@ struct ReportView: View {
                 Button("Save as page") { saveAsPage(r) }.buttonStyle(Pill(kind: .primary))
             }.padding(.horizontal, 22).padding(.vertical, 10)
             Divider()
-            StyledScroll { content(r).padding(22).frame(maxWidth: .infinity, alignment: .leading) }
+            StyledScroll {
+                Group { if view == .summary { content(r) } else { ResourcesContent(plan: plan, collapsed: $collapsed) } }
+                    .padding(22).frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
     }
 
@@ -211,10 +218,11 @@ struct ReportView: View {
     @MainActor private func exportPDF(_ r: PlanMath.Report) {
         let panel = NSSavePanel(); panel.allowedContentTypes = [.pdf]; panel.nameFieldStringValue = "\(plan.title) report.pdf"
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        let page = VStack(alignment: .leading, spacing: 14) {
+        let page = VStack(alignment: .leading, spacing: 22) {
             Text("\(plan.title): status report").font(.system(size: 22, weight: .bold))
             content(r)
-        }.padding(36).frame(width: 760, alignment: .leading).background(Color.white).environment(\.colorScheme, .light)
+            ResourcesContent(plan: plan, collapsed: .constant([]))
+        }.padding(36).frame(width: 820, alignment: .leading).background(Color.white).environment(\.colorScheme, .light)
         let renderer = ImageRenderer(content: page)
         renderer.render { size, draw in
             var box = CGRect(origin: .zero, size: size)
@@ -222,5 +230,128 @@ struct ReportView: View {
             ctx.beginPDFPage(nil); draw(ctx); ctx.endPDFPage(); ctx.closePDF()
         }
         AppModel.shared.show("Exported the PDF.")
+    }
+}
+
+/// Who does how much: by phase and task in person-days, a person by phase table, and over-capacity flags.
+struct ResourcesContent: View {
+    let plan: Plan
+    @Binding var collapsed: Set<String>
+
+    private func fmt(_ v: Double) -> String { v >= 100 ? String(Int(v.rounded())) : String(format: "%.1f", v) }
+
+    var body: some View {
+        let a = PlanMath.allocation(plan)
+        VStack(alignment: .leading, spacing: 16) {
+            if a.total == 0 {
+                Text("Assign people to tasks to see who does how much.").font(.system(size: 13)).foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 120)
+            } else {
+                HStack(spacing: 10) {
+                    kpi(fmt(a.total), "person-days in the plan")
+                    kpi("\(a.peopleCount)", "people allocated")
+                    kpi(fmt(a.total / Double(max(plan.tasks.count, 1))), "average per task")
+                    kpi(a.top?.name ?? "None", "largest share, \(fmt(a.top?.days ?? 0)) person-days", Theme.accent)
+                }
+                let flags = a.phases.filter { !$0.overloaded.isEmpty }
+                if !flags.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Over capacity").font(.system(size: 12, weight: .semibold))
+                        ForEach(flags) { p in
+                            ForEach(p.overloaded, id: \.name) { o in Text("\(o.name) reaches \(Int(o.days))% during \(p.name)").font(.system(size: 12.5)).foregroundStyle(.secondary) }
+                        }
+                    }.padding(10).frame(maxWidth: .infinity, alignment: .leading).background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 8))
+                }
+                SectionLabel("By phase and task")
+                table(a)
+                SectionLabel("Person-days by person and phase")
+                matrix(a)
+                Text("Click a phase to expand or collapse its tasks. Person-days are days per week times weeks, per person.").font(.system(size: 11.5)).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func table(_ a: Allocation) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Text("PHASE / TASK").frame(maxWidth: .infinity, alignment: .leading)
+                Text("PEOPLE, PERSON-DAYS EACH").frame(width: 300, alignment: .leading)
+                Text("PER WEEK").frame(width: 80, alignment: .leading)
+                Text("PERSON-DAYS").frame(width: 84, alignment: .trailing)
+                Text("SHARE").frame(width: 120, alignment: .leading)
+            }.font(.system(size: 10.5, weight: .semibold)).foregroundStyle(.secondary).padding(.horizontal, 10).padding(.vertical, 6)
+            Divider()
+            ForEach(a.phases) { ph in
+                let open = !collapsed.contains(ph.id)
+                Button { if open { collapsed.insert(ph.id) } else { collapsed.remove(ph.id) } } label: {
+                    HStack(spacing: 8) {
+                        HStack(spacing: 6) {
+                            Image(systemName: open ? "chevron.down" : "chevron.right").font(.system(size: 9, weight: .bold)).foregroundStyle(.secondary).frame(width: 10)
+                            Circle().fill(Color(hex: ph.color)).frame(width: 9, height: 9)
+                            Text(ph.name).font(.system(size: 12.5, weight: .semibold)).lineLimit(2)
+                            if !ph.overloaded.isEmpty { Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 10)).foregroundStyle(Theme.accent).help("Someone is over capacity in this phase") }
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                        chips(ph.people, limit: 3).frame(width: 300, alignment: .leading)
+                        Spacer().frame(width: 80)
+                        Text(fmt(ph.personDays)).font(.system(size: 12.5, weight: .semibold)).frame(width: 84, alignment: .trailing)
+                        shareBar(ph.share, Color(hex: ph.color)).frame(width: 120)
+                    }.padding(.horizontal, 10).padding(.vertical, 6).background(Theme.fill).contentShape(Rectangle())
+                }.buttonStyle(.plain)
+                if open {
+                    ForEach(ph.tasks) { t in
+                        HStack(spacing: 8) {
+                            Text(t.name).font(.system(size: 12.5)).lineLimit(2).padding(.leading, 38).frame(maxWidth: .infinity, alignment: .leading)
+                            chips(t.people, limit: 4).frame(width: 300, alignment: .leading)
+                            Text(t.daysPerWeek == 0 ? "" : "\(String(format: "%.1f", t.daysPerWeek)) days each").font(.system(size: 11.5)).foregroundStyle(.secondary).frame(width: 80, alignment: .leading)
+                            Text(fmt(t.personDays)).font(.system(size: 12.5)).frame(width: 84, alignment: .trailing)
+                            Text("\(String(format: "%.1f", t.share * 100))%").font(.system(size: 11.5)).foregroundStyle(.secondary).frame(width: 120, alignment: .leading)
+                        }.padding(.horizontal, 10).padding(.vertical, 4)
+                        Divider().opacity(0.5)
+                    }
+                }
+            }
+        }.background(Theme.card, in: RoundedRectangle(cornerRadius: 10)).overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.hairline))
+    }
+
+    private func chips(_ people: [Allocation.Share], limit: Int) -> some View {
+        HStack(spacing: 4) {
+            ForEach(Array(people.prefix(limit)), id: \.name) { s in
+                HStack(spacing: 3) { Text(s.name); Text(fmt(s.days)).fontWeight(.semibold) }.font(.system(size: 11)).padding(.horizontal, 7).padding(.vertical, 1).background(Theme.fill, in: Capsule())
+            }
+            if people.count > limit { Text("+\(people.count - limit)").font(.system(size: 11)).foregroundStyle(.secondary) }
+        }.lineLimit(1)
+    }
+
+    private func shareBar(_ share: Double, _ color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ProgressView(value: min(1, share * 3)).tint(color)
+            Text("\(Int((share * 100).rounded()))% of plan").font(.system(size: 11)).foregroundStyle(.secondary)
+        }
+    }
+
+    private func matrix(_ a: Allocation) -> some View {
+        let peak = a.matrix.values.flatMap(\.values).max() ?? 1
+        return VStack(spacing: 3) {
+            HStack(spacing: 3) {
+                Text("").frame(width: 100)
+                ForEach(a.phases) { ph in HStack(spacing: 4) { Circle().fill(Color(hex: ph.color)).frame(width: 7, height: 7); Text(ph.name.components(separatedBy: " ").first(where: { !$0.contains(".") && !$0.isEmpty }) ?? ph.name).lineLimit(1) }.font(.system(size: 10.5, weight: .semibold)).foregroundStyle(.secondary).frame(maxWidth: .infinity) }
+                Text("Total").font(.system(size: 10.5, weight: .semibold)).foregroundStyle(.secondary).frame(width: 64)
+            }
+            ForEach(a.people, id: \.self) { n in
+                let row = a.phases.map { a.matrix[n]?[$0.id] ?? 0 }
+                HStack(spacing: 3) {
+                    Text(n).font(.system(size: 12.5, weight: .medium)).lineLimit(1).frame(width: 100, alignment: .leading)
+                    ForEach(Array(row.enumerated()), id: \.offset) { _, v in
+                        Text(v == 0 ? "" : fmt(v)).font(.system(size: 11.5)).frame(maxWidth: .infinity).frame(height: 26)
+                            .background(v == 0 ? Theme.fill : Color.blue.opacity(0.12 + v / peak * 0.6), in: RoundedRectangle(cornerRadius: 6))
+                    }
+                    Text(fmt(row.reduce(0, +))).font(.system(size: 12, weight: .semibold)).frame(width: 64)
+                }
+            }
+        }
+    }
+
+    private func kpi(_ v: String, _ l: String, _ c: Color = .primary) -> some View {
+        VStack(alignment: .leading, spacing: 1) { Text(v).font(.system(size: 22, weight: .semibold)).foregroundStyle(c).lineLimit(1); Text(l).font(.system(size: 11.5)).foregroundStyle(.secondary).lineLimit(2) }
+            .frame(maxWidth: .infinity, alignment: .leading).card(padding: 10)
     }
 }

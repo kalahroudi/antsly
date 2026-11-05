@@ -73,3 +73,41 @@ final class PlanTests: XCTestCase {
         XCTAssertThrowsError(try GanttMagicImport.parse(Data("{}".utf8)))
     }
 }
+
+final class AllocationTests: XCTestCase {
+    func d(_ y: Int, _ m: Int, _ day: Int = 1) -> Date { PlanMath.cal.date(from: DateComponents(year: y, month: m, day: day))! }
+
+    func plan() -> Plan {
+        let mo = Plan.Person(id: "mo", name: "Mo"), dan = Plan.Person(id: "dan", name: "Dan")
+        let p1 = Plan.Phase(id: "p1", name: "Build", color: "#111"), p2 = Plan.Phase(id: "p2", name: "Ship", color: "#222")
+        let a = Plan.Task(id: "a", phaseID: "p1", name: "A", start: d(2026, 1), end: d(2026, 1, 29), assignments: [.init(personID: "mo", daysPerWeek: 2.5)])      // 4 weeks: 10 person-days
+        let b = Plan.Task(id: "b", phaseID: "p1", name: "B", start: d(2026, 1), end: d(2026, 1, 29), assignments: [.init(personID: "mo", daysPerWeek: 3), .init(personID: "dan", daysPerWeek: 1)])  // Mo 12, Dan 4
+        let c = Plan.Task(id: "c", phaseID: "p2", name: "C", start: d(2026, 2), end: d(2026, 2, 26), assignments: [.init(personID: "dan", daysPerWeek: 2)])
+        return Plan(id: "x", title: "T", phases: [p1, p2], people: [mo, dan], tasks: [a, b, c])
+    }
+
+    func testTotalsSharesAndMatrix() {
+        let a = PlanMath.allocation(plan())
+        XCTAssertEqual(a.total, 10 + 16 + 25.0 / 7 * 2, accuracy: 0.001)         // A 10, B 16, C is 25 days at 2 days a week
+        XCTAssertEqual(a.phases[0].personDays, 26, accuracy: 0.001)
+        XCTAssertEqual(a.phases[0].people.first?.name, "Mo"); XCTAssertEqual(a.phases[0].people.first!.days, 22, accuracy: 0.001)
+        XCTAssertEqual(a.matrix["Dan"]?["p1"] ?? 0, 4, accuracy: 0.001)
+        XCTAssertEqual(a.phases.map(\.share).reduce(0, +), 1, accuracy: 0.0001)
+        XCTAssertEqual(a.top?.name, "Mo"); XCTAssertEqual(a.peopleCount, 2)
+    }
+
+    func testOverloadFlagPerPhase() {
+        let a = PlanMath.allocation(plan())
+        // Mo has 2.5 + 3 = 5.5 days per week in Build, so 110% of a 5 day week.
+        XCTAssertEqual(a.phases[0].overloaded.map(\.name), ["Mo"])
+        XCTAssertEqual(a.phases[0].overloaded.first!.days, 110, accuracy: 1)
+        XCTAssertTrue(a.phases[1].overloaded.isEmpty)
+    }
+
+    func testMarkdownContainsTablesAndFlags() {
+        let p = plan()
+        let md = PlanMath.markdown(p, report: PlanMath.report(p, now: d(2026, 1, 10)), now: d(2026, 1, 10))
+        XCTAssertTrue(md.contains("## Resource allocation")); XCTAssertTrue(md.contains("| Build |"))
+        XCTAssertTrue(md.contains("Mo reaches 110% during Build")); XCTAssertTrue(md.contains("By person and phase"))
+    }
+}
