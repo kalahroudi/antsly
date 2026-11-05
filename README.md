@@ -37,7 +37,8 @@ Never call a destructive tool without asking me first.
 | | |
 |---|---|
 | ![Timeline](docs/screenshots/plan-timeline.png) | ![Workload](docs/screenshots/plan-workload.png) |
-| ![Report](docs/screenshots/plan-report.png) | ![Database](docs/screenshots/database.png) |
+| ![Report](docs/screenshots/plan-report.png) | ![Resources](docs/screenshots/plan-resources.png) |
+| ![Database](docs/screenshots/database.png) | ![Sharing](docs/screenshots/sharing.png) |
 
 ## First release notes
 
