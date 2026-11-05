@@ -163,6 +163,43 @@ final class WorkspaceModel {
         dirtyPages.insert(remote.id); scheduleSave()
     }
 
+    /// Puts blocks after `after`, or at the end. An empty text block that is being edited is replaced rather than left behind.
+    func insert(_ blocks: [Block], into pageID: String, after: String?) {
+        editPage(pageID) { p in
+            var at = p.blocks.count
+            if let after, let i = p.blocks.firstIndex(where: { $0.id == after }) {
+                if p.blocks[i].kind == .text, p.blocks[i].text.isEmpty { p.blocks.remove(at: i); at = i } else { at = i + 1 }
+            }
+            p.blocks.insert(contentsOf: blocks, at: at)
+        }
+    }
+
+    /// Copies dropped files and images into the workspace's `assets` folder and returns the blocks that show them.
+    func assetBlocks(files: [URL], images: [Data]) -> [Block] {
+        var out: [Block] = []
+        for u in files {
+            do { out.append(WorkspaceStore.assetBlock(for: try store.importAsset(from: u))) } catch { report(error, "Adding \(u.lastPathComponent)") }
+        }
+        let stamp = Int(Date().timeIntervalSince1970)
+        for (n, d) in images.enumerated() {
+            do { out.append(WorkspaceStore.assetBlock(for: try store.importAsset(data: d, name: "Image-\(stamp)-\(n + 1).png"))) } catch { report(error, "Adding the image") }
+        }
+        return out
+    }
+
+    /// Replaces blocks made from pasted text with a version your own Claude Code sorted. One undo step brings the old ones back.
+    func organiseWithAI(pageID: String, ids: [String], text: String) async {
+        do {
+            let blocks = try await AIOrganizer.organise(text)
+            editPage(pageID) { p in
+                guard let first = p.blocks.firstIndex(where: { ids.contains($0.id) }) else { return }
+                p.blocks.removeAll { ids.contains($0.id) }
+                p.blocks.insert(contentsOf: blocks, at: min(first, p.blocks.count))
+            }
+            show("Organised with Claude Code.")
+        } catch { report(error, "Organising with AI") }
+    }
+
     func removeRemote(pageID: String) { pages.removeAll { $0.id == pageID }; store.delete(pageID: pageID); if selected == .page(pageID) { selected = nil } }
 
     func newPage() { recordUndo(UUID().uuidString); let p = Page(); pages.insert(p, at: 0); dirtyPages.insert(p.id); selected = .page(p.id); scheduleSave(); Collab.shared.send(p) }

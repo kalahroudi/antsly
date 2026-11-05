@@ -193,4 +193,55 @@ final class UndoTests: XCTestCase {
         XCTAssertTrue(p.contains("Fix login")); XCTAssertFalse(p.contains("Other")); XCTAssertTrue(p.contains("databases/x.json"))
         XCTAssertTrue(AgentTask.stylePrompt(for: db, file: "f").contains("kind"))
     }
+
+    // MARK: Drag and drop: organising text and importing assets
+
+    func testOrganizerSortsPastedNotes() {
+        let text = """
+        Plan for Friday:
+        - [ ] Book the room
+        - [x] Send the invite
+        * Bring laptops
+        1. Agenda first
+        > Remember the demo
+
+        Thanks for reading this note about the plan that was wrapped by the sender and carries on
+        onto a second line here.
+        """
+        let b = ContentOrganizer.blocks(from: text)
+        XCTAssertEqual(b.map(\.kind), [.heading, .todo, .todo, .bullet, .bullet, .callout, .text])
+        XCTAssertEqual(b[0].text, "Plan for Friday"); XCTAssertFalse(b[1].checked); XCTAssertTrue(b[2].checked)
+        XCTAssertTrue(b[6].text.hasSuffix("onto a second line here."))
+        XCTAssertEqual(ContentOrganizer.blocks(from: "From: Sam\nSubject: Hello").map(\.text), ["From: Sam", "Subject: Hello"])
+        XCTAssertTrue(ContentOrganizer.blocks(from: "  \n ").isEmpty)
+    }
+
+    func testAIReplyParsing() {
+        let reply = "Here you go:\n```json\n[{\"kind\":\"todo\",\"text\":\"Call Sam\",\"checked\":true},{\"kind\":\"image\",\"text\":\"odd\"},{\"kind\":\"heading\",\"text\":\"\"}]\n```"
+        let b = AIOrganizer.parse(reply)
+        XCTAssertEqual(b?.map(\.kind), [.todo, .text]); XCTAssertEqual(b?.first?.checked, true)
+        XCTAssertNil(AIOrganizer.parse("no json here"))
+        XCTAssertNil(AIOrganizer.parse("[]"))
+    }
+
+    func testImportAssetsKeepsNamesUniqueAndSafe() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("antsly-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = WorkspaceStore(root: dir)
+        let a = try store.importAsset(data: Data("one".utf8), name: "My report (final).pdf")
+        let b = try store.importAsset(data: Data("two".utf8), name: "My report (final).pdf")
+        XCTAssertEqual(a, "assets/My-report--final-.pdf"); XCTAssertEqual(b, "assets/My-report--final--2.pdf")
+        XCTAssertEqual(try String(contentsOf: store.assetURL(a), encoding: .utf8), "one")
+        XCTAssertEqual(WorkspaceStore.assetBlock(for: "assets/shot.PNG").kind, .image)
+        XCTAssertEqual(WorkspaceStore.assetBlock(for: a).kind, .file)
+    }
+
+    func testAssetBlocksSurviveMarkdown() {
+        let p = Page(id: "p", title: "T", blocks: [Block(id: "i", kind: .image, text: "assets/shot.png"), Block(id: "f", kind: .file, text: "assets/plan.pdf"), Block(id: "t", kind: .text, text: "after")])
+        let md = PageMarkdown.render(p)
+        XCTAssertTrue(md.contains("![shot.png](assets/shot.png)")); XCTAssertTrue(md.contains("[plan.pdf](assets/plan.pdf)"))
+        let back = PageMarkdown.parse(md, fallbackID: "x", updated: 1)
+        XCTAssertEqual(back.blocks.map(\.kind), [.image, .file, .text]); XCTAssertEqual(back.blocks.map(\.text), ["assets/shot.png", "assets/plan.pdf", "after"])
+        XCTAssertEqual(back.blocks.map(\.id), ["i", "f", "t"])
+    }
 }
