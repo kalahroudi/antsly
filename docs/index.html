@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Antsly</title>
+<meta name="description" content="A native macOS workspace for notes, documents, databases and project plans.">
+<link rel="icon" href="icon.svg">
+<style>
+:root{--bg:#faf9f8;--ink:#1f1d1c;--muted:#6f6a67;--accent:#c93b27;--card:#fff;--hair:rgba(0,0,0,.1)}
+@media(prefers-color-scheme:dark){:root{--bg:#161515;--ink:#f2efee;--muted:#a09a97;--accent:#ff6f59;--card:#222121;--hair:rgba(255,255,255,.12)}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 -apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif}
+main{max-width:980px;margin:0 auto;padding:48px 20px}
+header{display:flex;gap:18px;align-items:center;margin-bottom:12px}header img{width:72px;height:72px}
+h1{font-size:40px;margin:0;letter-spacing:-.02em}p.lead{font-size:20px;color:var(--muted);max-width:60ch;margin:8px 0 28px}
+.btn{display:inline-block;background:var(--accent);color:#fff;padding:10px 18px;border-radius:9px;text-decoration:none;font-weight:600}
+.btn.plain{background:transparent;color:var(--ink);border:1px solid var(--hair);margin-left:8px}
+img.shot{width:100%;border-radius:12px;border:1px solid var(--hair);margin-top:34px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;margin-top:34px}
+.grid div{background:var(--card);border:1px solid var(--hair);border-radius:12px;padding:16px 18px}.grid h3{margin:0 0 4px;font-size:16px}.grid p{margin:0;color:var(--muted);font-size:14.5px}
+footer{margin-top:40px;color:var(--muted);font-size:14px}a{color:var(--accent)}
+</style></head><body><main>
+<header><img src="icon.svg" alt=""><h1>Antsly</h1></header>
+<p class="lead">Notes, documents, databases and project plans in one native Mac app. Plain files you own, version history with git, and live collaboration over Tailscale.</p>
+<a class="btn" href="https://github.com/kalahroudi/antsly/releases/latest">Download</a><a class="btn plain" href="https://github.com/kalahroudi/antsly">Source on GitHub</a>
+<img class="shot" src="screenshots/page.png" alt="Antsly page editor">
+<div class="grid">
+<div><h3>Block editor</h3><p>Text, headings, to-dos, callouts and code. Press / to change a block.</p></div>
+<div><h3>Project plans</h3><p>Timeline, capacity-based resource heatmap by day to year, burnup and one-click status reports.</p></div>
+<div><h3>Version history</h3><p>Git under the hood, with diffs, restore and a friendly conflict picker.</p></div>
+<div><h3>GitHub issues</h3><p>Pulled into a database and pushed back with your own sign-in.</p></div>
+<div><h3>Cloud sync</h3><p>One switch puts your workspace in iCloud Drive.</p></div>
+<div><h3>Live collaboration</h3><p>Invite people on your Tailscale network and edit together in real time.</p></div>
+</div>
+<img class="shot" src="screenshots/plan-timeline.png" alt="Project plan timeline">
+<img class="shot" src="screenshots/plan-workload.png" alt="Resource heatmap">
+<img class="shot" src="screenshots/plan-report.png" alt="Status report">
+<footer>Apache-2.0 · macOS 14 or later · <a href="https://github.com/kalahroudi/antsly">github.com/kalahroudi/antsly</a></footer>
+</main></body></html>
