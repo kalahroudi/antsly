@@ -91,13 +91,13 @@ struct PopoverShot: View {
         let c = Calendar(identifier: .gregorian)
         func d(_ mo: Int, _ y: Int = 2026) -> Date { c.date(from: DateComponents(timeZone: TimeZone(identifier: "UTC"), year: y, month: mo, day: 1))! }
         let launch = Page(id: "launch", title: "Launch plan", blocks: [
-            Block(kind: .text, text: "Ship the first public build of Antsly and collect feedback from the first 50 users."),
+            Block(kind: .text, text: "Ship the **first public build** of Antsly and collect feedback from the *first 50 users*. Details are in the [release checklist](https://github.com/kalahroudi/antsly)."),
             Block(kind: .callout, text: "Goal: a stable 0.1 release with cloud sync by the end of the month."),
             Block(kind: .todo, text: "Write the README with screenshots", checked: true),
             Block(kind: .todo, text: "Publish the GitHub Pages site", checked: true),
             Block(kind: .todo, text: "Record a 30 second demo"),
-            Block(kind: .todo, text: "Tag v0.1.0 and attach the signed DMG"),
-            Block(kind: .heading, text: "Notes"), Block(kind: .bullet, text: "Invite the first testers over Tailscale"), Block(kind: .bullet, text: "Track feedback as GitHub issues")])
+            Block(kind: .todo, text: "Tag `v0.1.0` and attach the signed DMG"),
+            Block(kind: .heading, text: "Notes"), Block(kind: .bullet, text: "Invite the first testers over Tailscale"), Block(kind: .bullet, text: "Track feedback as GitHub issues, see https://github.com/kalahroudi/antsly/issues"), Block(kind: .code, text: "scripts/make-dmg.sh\nscripts/notarize.sh")])
         let meet = Page(id: "meet", title: "Meeting notes", blocks: [Block(kind: .text, text: "Weekly sync.")])
         let wiki = Page(id: "wiki", title: "Product wiki", blocks: [Block(kind: .text, text: "How Antsly works.")])
         var roadmap = Database.tasks(title: "Roadmap")

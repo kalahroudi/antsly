@@ -244,4 +244,21 @@ final class UndoTests: XCTestCase {
         XCTAssertEqual(back.blocks.map(\.kind), [.image, .file, .text]); XCTAssertEqual(back.blocks.map(\.text), ["assets/shot.png", "assets/plan.pdf", "after"])
         XCTAssertEqual(back.blocks.map(\.id), ["i", "f", "t"])
     }
+
+    // MARK: Rich rendering
+
+    func testInlineMarkdownRenders() {
+        let a = InlineMarkdown.attributed("Ship **now**, see [docs](https://example.com/a) or https://example.org/x.")
+        XCTAssertEqual(String(a.characters), "Ship now, see docs or https://example.org/x.")
+        let links = a.runs.compactMap(\.link).map(\.absoluteString)
+        XCTAssertEqual(links, ["https://example.com/a", "https://example.org/x"])   // the full stop is not part of the address
+        XCTAssertTrue(a.runs.contains { $0.inlinePresentationIntent?.contains(.stronglyEmphasized) == true })
+    }
+
+    func testInlineMarkdownLeavesOddTextAlone() {
+        XCTAssertEqual(String(InlineMarkdown.attributed("2 * 3 = 6 and snake_case_name").characters), "2 * 3 = 6 and snake_case_name")
+        XCTAssertFalse(InlineMarkdown.hasMarkup("Just a plain sentence."))
+        XCTAssertTrue(InlineMarkdown.hasMarkup("Visit https://example.com"))
+        XCTAssertEqual(InlineMarkdown.attributed("[a](https://x.io)").runs.compactMap(\.link).count, 1)   // not linkified twice
+    }
 }

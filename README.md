@@ -24,6 +24,7 @@ Never call a destructive tool without asking me first.
 ## What it does
 
 - **Pages**: a block editor with text, headings, to-dos, bullets, callouts and code. Type `/` to change a block. Pages are Markdown files.
+- **Rich text**: pages show **bold**, *italic*, `code`, links and web addresses formatted, and switch back to plain Markdown when you click to edit. Copied web and mail content keeps its formatting.
 - **Drop and paste**: drop text, images, PDFs or any file onto a page. Text is sorted into to-dos, bullets and headings at once, and "Organise with AI" refines it through your own Claude Code. Files are copied into `assets/`.
 - **Databases**: table and board views with typed columns (status, choice, date, person, number, checkbox, link), group edit and delete, and one-click prompts for your AI agent. Rows are JSON files.
 - **Project plans**: phases and tasks on a timeline, per-person allocation and capacity, a resource heatmap by day, week, month or year, a burnup chart (person-days, story points or tasks), a critical path and one-click status reports as a page, Markdown or PDF. Imports a Gantt Magic backup.

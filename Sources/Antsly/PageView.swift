@@ -67,7 +67,7 @@ struct PageView: View {
             .padding(.horizontal, 28).padding(.vertical, 18)
             .frame(maxWidth: 780, alignment: .leading).frame(maxWidth: .infinity)
         }
-        .onDrop(of: [.fileURL, .image, .plainText], isTargeted: $targeted) { drop($0) }
+        .onDrop(of: [.fileURL, .image, .html, .plainText], isTargeted: $targeted) { drop($0) }
         .overlay { if targeted && !readOnly { RoundedRectangle(cornerRadius: 10).stroke(Theme.accent, style: StrokeStyle(lineWidth: 2, dash: [6])).padding(6).allowsHitTesting(false) } }
     }
 
@@ -94,6 +94,7 @@ struct PageView: View {
             for p in providers {
                 if p.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier), let u = await Self.loadFileURL(p) { files.append(u) }
                 else if p.hasItemConformingToTypeIdentifier(UTType.image.identifier), let d = await Self.loadImage(p) { images.append(d) }
+                else if p.hasItemConformingToTypeIdentifier(UTType.html.identifier), let h = await Self.loadHTML(p), let md = RichPaste.markdown(fromHTML: h) { texts.append(md) }
                 else if p.canLoadObject(ofClass: NSString.self), let t = await Self.loadString(p) { texts.append(t) }
             }
             ingest(text: texts.isEmpty ? nil : texts.joined(separator: "\n\n"), files: files, images: images)
@@ -104,7 +105,8 @@ struct PageView: View {
     private func pasteAndOrganise() {
         let pb = NSPasteboard.general
         let urls = (pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
-        let text = urls.isEmpty ? pb.string(forType: .string) : nil
+        let html = pb.string(forType: .html).flatMap { RichPaste.markdown(fromHTML: $0) }
+        let text = urls.isEmpty ? (html ?? pb.string(forType: .string)) : nil
         var images: [Data] = []
         if urls.isEmpty, text == nil, let img = NSImage(pasteboard: pb), let png = Self.png(img) { images = [png] }
         if urls.isEmpty, text == nil, images.isEmpty { AppModel.shared.show("Nothing to paste.", error: true); return }
@@ -137,6 +139,10 @@ struct PageView: View {
         let data: Data? = await withCheckedContinuation { c in p.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { d, _ in c.resume(returning: d) } }
         return data.flatMap { NSImage(data: $0) }.flatMap(png)
     }
+    private static func loadHTML(_ p: NSItemProvider) async -> String? {
+        let data: Data? = await withCheckedContinuation { c in p.loadDataRepresentation(forTypeIdentifier: UTType.html.identifier) { d, _ in c.resume(returning: d) } }
+        return data.map { String(decoding: $0, as: UTF8.self) }
+    }
     private static func loadString(_ p: NSItemProvider) async -> String? {
         await withCheckedContinuation { c in _ = p.loadObject(ofClass: NSString.self) { o, _ in c.resume(returning: o as? String) } }
     }
@@ -159,6 +165,7 @@ struct BlockRow: View {
     let collab = Collab.shared
     @State private var hover = false
     @State private var confirmDelete = false
+    @State private var editing = false      // a tap on rendered text switches that block to its Markdown source
 
     private var block: Block? { ws.page(pageID)?.blocks.first { $0.id == blockID } }
     private var slash: Bool { (block?.text ?? "").hasPrefix("/") }
@@ -170,13 +177,16 @@ struct BlockRow: View {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     handle(b)
                     lead(b)
-                    if b.kind.isAsset { AssetBlock(block: b) } else {
+                    if b.kind.isAsset { AssetBlock(block: b) }
+                    else if showsRendered(b) { rendered(b) }
+                    else {
                     TextField("Type / for blocks", text: Binding(get: { block?.text ?? "" }, set: { v in ws.editPage(pageID) { p in if let i = p.blocks.firstIndex(where: { $0.id == blockID }) { p.blocks[i].text = v } } }), axis: .vertical)
                         .textFieldStyle(.plain)
                         .font(font(b.kind))
                         .foregroundStyle(b.kind == .todo && b.checked ? Color.secondary : Color.primary)
                         .strikethrough(b.kind == .todo && b.checked)
                         .focused(focus, equals: blockID)
+                        .onAppear { if editing { focus.wrappedValue = blockID } }
                         .disabled(readOnly)
                         .onSubmit { addAfter(b) }
                         .onKeyPress(.delete) { if b.text.isEmpty, (ws.page(pageID)?.blocks.count ?? 0) > 1 { remove(); return .handled }; return .ignored }
@@ -187,12 +197,30 @@ struct BlockRow: View {
                     }
                 }
                 .padding(.vertical, b.kind == .heading ? 6 : 2)
-                .padding(.horizontal, b.kind == .callout ? 10 : 0)
+                .padding(.horizontal, b.kind == .callout ? 10 : (b.kind == .code ? 10 : 0))
+                .overlay(alignment: .topTrailing) { if b.kind == .code && hover { CopyButton(text: b.text, label: "Copy code").padding(6) } }
                 .background(b.kind == .callout ? Theme.accentSoft : (b.kind == .code ? Theme.fill : .clear), in: RoundedRectangle(cornerRadius: 8))
                 if slash && !readOnly { slashMenu(b) }
             }
             .onHover { hover = $0 }
+            .onChange(of: focus.wrappedValue) { _, new in if new != blockID { editing = false } }
         }
+    }
+
+    /// Formatted text when the block is not being edited. Empty blocks and code stay as editable fields.
+    private func showsRendered(_ b: Block) -> Bool {
+        guard b.kind != .code, !b.text.isEmpty, InlineMarkdown.hasMarkup(b.text) || readOnly else { return false }
+        return readOnly || (!editing && focus.wrappedValue != blockID)
+    }
+
+    private func rendered(_ b: Block) -> some View {
+        Text(InlineMarkdown.attributed(b.text)).font(font(b.kind))
+            .foregroundStyle(b.kind == .todo && b.checked ? Color.secondary : Color.primary)
+            .strikethrough(b.kind == .todo && b.checked)
+            .tint(Theme.accent)
+            .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+            .onTapGesture { if !readOnly { editing = true } }
+            .help(readOnly ? "" : "Click to edit")
     }
 
     @ViewBuilder private func lead(_ b: Block) -> some View {
