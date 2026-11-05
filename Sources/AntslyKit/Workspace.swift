@@ -1,0 +1,196 @@
+// SPDX-License-Identifier: Apache-2.0
+
+import Foundation
+
+/// One block of a page. Blocks have stable ids so collaborators can merge edits block by block.
+public struct Block: Identifiable, Equatable, Codable, Sendable {
+    public enum Kind: String, Codable, Sendable, CaseIterable { case text, heading, todo, bullet, callout, code }
+    public var id: String
+    public var kind: Kind
+    public var text: String
+    public var checked: Bool
+    public var stamp: Double          // last edit time, used for last-writer-wins merging
+    public init(id: String = UUID().uuidString, kind: Kind = .text, text: String = "", checked: Bool = false, stamp: Double = Date().timeIntervalSince1970) {
+        self.id = id; self.kind = kind; self.text = text; self.checked = checked; self.stamp = stamp
+    }
+}
+
+public struct Page: Identifiable, Equatable, Codable, Sendable {
+    public var id: String
+    public var title: String
+    public var blocks: [Block]
+    public var updated: Double
+    public init(id: String = UUID().uuidString, title: String = "Untitled", blocks: [Block] = [Block()], updated: Double = Date().timeIntervalSince1970) {
+        self.id = id; self.title = title; self.blocks = blocks; self.updated = updated
+    }
+}
+
+/// Pages are plain Markdown so they diff and merge well in git and open anywhere.
+/// First line `# Title`, then one block per paragraph. Block ids live in an HTML comment so edits keep identity.
+public enum PageMarkdown {
+    public static func render(_ page: Page) -> String {
+        var out = "<!-- antsly:\(page.id) -->\n# \(page.title)\n\n"
+        for b in page.blocks {
+            let tag = "<!--b:\(b.id)-->"
+            switch b.kind {
+            case .text: out += "\(b.text) \(tag)\n\n"
+            case .heading: out += "## \(b.text) \(tag)\n\n"
+            case .todo: out += "- [\(b.checked ? "x" : " ")] \(b.text) \(tag)\n\n"
+            case .bullet: out += "- \(b.text) \(tag)\n\n"
+            case .callout: out += "> \(b.text) \(tag)\n\n"
+            case .code: out += "```\n\(b.text)\n``` \(tag)\n\n"
+            }
+        }
+        return out
+    }
+
+    public static func parse(_ md: String, fallbackID: String, updated: Double) -> Page {
+        var id = fallbackID, title = "Untitled", blocks: [Block] = []
+        var lines = md.components(separatedBy: "\n")[...]
+        if let f = lines.first, f.hasPrefix("<!-- antsly:"), let r = f.range(of: "-->") {
+            id = String(f.dropFirst(12)[..<f.index(f.startIndex, offsetBy: f.distance(from: f.startIndex, to: r.lowerBound))]).trimmingCharacters(in: .whitespaces)
+            lines = lines.dropFirst()
+        }
+        if let f = lines.first(where: { !$0.isEmpty }), f.hasPrefix("# ") { title = String(f.dropFirst(2)); lines = lines.drop(while: { $0 != f }).dropFirst() }
+
+        func split(_ s: String) -> (String, String?) {
+            guard let r = s.range(of: "<!--b:", options: .backwards), s.hasSuffix("-->") else { return (s, nil) }
+            let bid = String(s[r.upperBound...].dropLast(3))
+            return (String(s[..<r.lowerBound]).trimmingCharacters(in: .whitespaces), bid)
+        }
+        var i = lines.startIndex
+        while i < lines.endIndex {
+            let line = lines[i]
+            if line.isEmpty { i += 1; continue }
+            if line.hasPrefix("```") {
+                var body: [String] = []; i += 1
+                var bid: String?
+                while i < lines.endIndex, !lines[i].hasPrefix("```") { body.append(lines[i]); i += 1 }
+                if i < lines.endIndex { bid = split(lines[i]).1 }
+                i += 1
+                blocks.append(Block(id: bid ?? UUID().uuidString, kind: .code, text: body.joined(separator: "\n"), stamp: updated))
+                continue
+            }
+            var (text, bid) = split(line)
+            var kind = Block.Kind.text, checked = false
+            if text.hasPrefix("## ") { kind = .heading; text = String(text.dropFirst(3)) }
+            else if text.hasPrefix("- [x] ") { kind = .todo; checked = true; text = String(text.dropFirst(6)) }
+            else if text.hasPrefix("- [ ] ") { kind = .todo; text = String(text.dropFirst(6)) }
+            else if text.hasPrefix("- ") { kind = .bullet; text = String(text.dropFirst(2)) }
+            else if text.hasPrefix("> ") { kind = .callout; text = String(text.dropFirst(2)) }
+            blocks.append(Block(id: bid ?? UUID().uuidString, kind: kind, text: text, checked: checked, stamp: updated))
+            i += 1
+        }
+        if blocks.isEmpty { blocks = [Block(stamp: updated)] }
+        return Page(id: id, title: title, blocks: blocks, updated: updated)
+    }
+}
+
+/// A database: typed columns and rows, stored as JSON next to the pages. Issues from GitHub use the same shape.
+public struct Database: Identifiable, Equatable, Codable, Sendable {
+    public struct Column: Equatable, Codable, Sendable, Identifiable { public var id: String; public var name: String
+        public init(id: String, name: String) { self.id = id; self.name = name } }
+    public struct Row: Equatable, Codable, Sendable, Identifiable { public var id: String; public var cells: [String: String]
+        public init(id: String = UUID().uuidString, cells: [String: String] = [:]) { self.id = id; self.cells = cells } }
+    public var id: String
+    public var title: String
+    public var columns: [Column]
+    public var rows: [Row]
+    public var groupBy: String?        // column id whose values form board lanes
+    public var source: String?         // "github:owner/repo" when rows mirror GitHub issues
+    public init(id: String = UUID().uuidString, title: String, columns: [Column], rows: [Row] = [], groupBy: String? = nil, source: String? = nil) {
+        self.id = id; self.title = title; self.columns = columns; self.rows = rows; self.groupBy = groupBy; self.source = source
+    }
+    public static func tasks(title: String = "Tasks") -> Database {
+        Database(title: title, columns: [.init(id: "name", name: "Task"), .init(id: "status", name: "Status"), .init(id: "owner", name: "Owner"), .init(id: "due", name: "Due")], groupBy: "status")
+    }
+    public var lanes: [String] {
+        guard let g = groupBy else { return [] }
+        var seen: [String] = []
+        for r in rows { let v = r.cells[g] ?? ""; if !seen.contains(v) { seen.append(v) } }
+        return seen
+    }
+}
+
+/// Reads and writes one workspace folder. All writes are atomic (temp file + rename).
+public final class WorkspaceStore: @unchecked Sendable {
+    public let root: URL
+    public var pagesDir: URL { root.appendingPathComponent("pages", isDirectory: true) }
+    public var databasesDir: URL { root.appendingPathComponent("databases", isDirectory: true) }
+    public var plansDir: URL { root.appendingPathComponent("plans", isDirectory: true) }
+
+    public init(root: URL) { self.root = root }
+
+    public static var defaultRoot: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("Antsly", isDirectory: true)
+    }
+    /// The iCloud Drive folder, if the user is signed in to iCloud Drive.
+    public static var iCloudRoot: URL? {
+        let base = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Mobile Documents/com~apple~CloudDocs", isDirectory: true)
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: base.path, isDirectory: &isDir), isDir.boolValue else { return nil }
+        return base.appendingPathComponent("Antsly", isDirectory: true)
+    }
+
+    public func ensure() throws {
+        for d in [root, pagesDir, databasesDir, plansDir] { try FileManager.default.createDirectory(at: d, withIntermediateDirectories: true) }
+    }
+
+    private func write(_ data: Data, to url: URL) throws {
+        let tmp = url.deletingLastPathComponent().appendingPathComponent(".\(url.lastPathComponent).tmp")
+        try data.write(to: tmp)
+        if FileManager.default.fileExists(atPath: url.path) { _ = try FileManager.default.replaceItemAt(url, withItemAt: tmp) }
+        else { try FileManager.default.moveItem(at: tmp, to: url) }
+    }
+
+    public func pageURL(_ id: String) -> URL { pagesDir.appendingPathComponent("\(id).md") }
+
+    public func save(_ page: Page) throws {
+        try ensure()
+        try write(Data(PageMarkdown.render(page).utf8), to: pageURL(page.id))
+    }
+
+    public func loadPages() -> [Page] {
+        let files = (try? FileManager.default.contentsOfDirectory(at: pagesDir, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+        return files.filter { $0.pathExtension == "md" }.compactMap { u in
+            guard let md = try? String(contentsOf: u, encoding: .utf8) else { return nil }
+            let m = (try? u.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)?.timeIntervalSince1970 ?? 0
+            return PageMarkdown.parse(md, fallbackID: u.deletingPathExtension().lastPathComponent, updated: m)
+        }.sorted { $0.updated > $1.updated }
+    }
+
+    public func delete(pageID: String) { try? FileManager.default.removeItem(at: pageURL(pageID)) }
+
+    public func save(_ db: Database) throws {
+        try ensure()
+        let enc = JSONEncoder(); enc.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try write(try enc.encode(db), to: databasesDir.appendingPathComponent("\(db.id).json"))
+    }
+
+    public func loadDatabases() -> [Database] {
+        let files = (try? FileManager.default.contentsOfDirectory(at: databasesDir, includingPropertiesForKeys: nil)) ?? []
+        return files.filter { $0.pathExtension == "json" }.compactMap { try? JSONDecoder().decode(Database.self, from: Data(contentsOf: $0)) }
+            .sorted { $0.title < $1.title }
+    }
+
+    private static var planEncoder: JSONEncoder { let e = JSONEncoder(); e.outputFormatting = [.prettyPrinted, .sortedKeys]; e.dateEncodingStrategy = .iso8601; return e }
+    public func save(_ plan: Plan) throws {
+        try ensure()
+        try write(try Self.planEncoder.encode(plan), to: plansDir.appendingPathComponent("\(plan.id).json"))
+    }
+    public func loadPlans() -> [Plan] {
+        let d = JSONDecoder(); d.dateDecodingStrategy = .iso8601
+        let files = (try? FileManager.default.contentsOfDirectory(at: plansDir, includingPropertiesForKeys: nil)) ?? []
+        return files.filter { $0.pathExtension == "json" }.compactMap { try? d.decode(Plan.self, from: Data(contentsOf: $0)) }.sorted { $0.title < $1.title }
+    }
+    public func delete(planID: String) { try? FileManager.default.removeItem(at: plansDir.appendingPathComponent("\(planID).json")) }
+
+    public func delete(databaseID: String) { try? FileManager.default.removeItem(at: databasesDir.appendingPathComponent("\(databaseID).json")) }
+
+    /// Case-insensitive search over titles and block text. Plain scan: workspaces are small and this runs only on demand.
+    public static func search(_ query: String, in pages: [Page]) -> [Page] {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return [] }
+        return pages.filter { $0.title.lowercased().contains(q) || $0.blocks.contains { $0.text.lowercased().contains(q) } }
+    }
+}
