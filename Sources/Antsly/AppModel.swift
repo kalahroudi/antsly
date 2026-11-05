@@ -72,6 +72,7 @@ final class AppModel {
         if demo { loadedOnce = true; return }
         setupState = SetupState.detect(workspace: WorkspaceModel.shared.store.root)
         WorkspaceModel.shared.reloadIfChanged()
+        WorkspaceModel.shared.toastDueReminders()
         if Prefs.shared.autoSyncGit { await WorkspaceModel.shared.autoVersionIfDue() }
         // Do the real reads here, off the main actor (Shell.run is async). Then publish results.
         onStatusChange?(busy ? .busy : .idle)

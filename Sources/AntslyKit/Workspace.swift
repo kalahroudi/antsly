@@ -260,6 +260,7 @@ public final class WorkspaceStore: @unchecked Sendable {
     public var databasesDir: URL { root.appendingPathComponent("databases", isDirectory: true) }
     public var plansDir: URL { root.appendingPathComponent("plans", isDirectory: true) }
     public var assetsDir: URL { root.appendingPathComponent("assets", isDirectory: true) }
+    public var remindersURL: URL { root.appendingPathComponent("reminders.json") }
 
     public init(root: URL) { self.root = root }
 
@@ -358,6 +359,16 @@ public final class WorkspaceStore: @unchecked Sendable {
         return files.filter { $0.pathExtension == "json" }.compactMap { try? d.decode(Plan.self, from: Data(contentsOf: $0)) }.sorted { $0.title < $1.title }
     }
     public func delete(planID: String) { try? FileManager.default.removeItem(at: plansDir.appendingPathComponent("\(planID).json")) }
+
+    public func save(_ reminders: [Reminder]) throws {
+        try ensure()
+        let e = JSONEncoder(); e.outputFormatting = [.prettyPrinted, .sortedKeys]; e.dateEncodingStrategy = .iso8601
+        try write(try e.encode(reminders.sorted { $0.when < $1.when }), to: remindersURL)
+    }
+    public func loadReminders() -> [Reminder] {
+        let d = JSONDecoder(); d.dateDecodingStrategy = .iso8601
+        return (try? d.decode([Reminder].self, from: Data(contentsOf: remindersURL))) ?? []
+    }
 
     public func delete(databaseID: String) { try? FileManager.default.removeItem(at: databasesDir.appendingPathComponent("\(databaseID).json")) }
 

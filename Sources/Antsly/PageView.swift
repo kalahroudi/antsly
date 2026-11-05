@@ -166,6 +166,7 @@ struct BlockRow: View {
     @State private var hover = false
     @State private var confirmDelete = false
     @State private var editing = false      // a tap on rendered text switches that block to its Markdown source
+    @State private var sel: Range<Int>?     // the characters selected in this block, when the system lets us see them
 
     private var block: Block? { ws.page(pageID)?.blocks.first { $0.id == blockID } }
     private var slash: Bool { (block?.text ?? "").hasPrefix("/") }
@@ -179,18 +180,8 @@ struct BlockRow: View {
                     lead(b)
                     if b.kind.isAsset { AssetBlock(block: b) }
                     else if showsRendered(b) { rendered(b) }
-                    else {
-                    TextField("Type / for blocks", text: Binding(get: { block?.text ?? "" }, set: { v in ws.editPage(pageID) { p in if let i = p.blocks.firstIndex(where: { $0.id == blockID }) { p.blocks[i].text = v } } }), axis: .vertical)
-                        .textFieldStyle(.plain)
-                        .font(font(b.kind))
-                        .foregroundStyle(b.kind == .todo && b.checked ? Color.secondary : Color.primary)
-                        .strikethrough(b.kind == .todo && b.checked)
-                        .focused(focus, equals: blockID)
-                        .onAppear { if editing { focus.wrappedValue = blockID } }
-                        .disabled(readOnly)
-                        .onSubmit { addAfter(b) }
-                        .onKeyPress(.delete) { if b.text.isEmpty, (ws.page(pageID)?.blocks.count ?? 0) > 1 { remove(); return .handled }; return .ignored }
-                    }
+                    else { editor(b) }
+                    if !b.text.isEmpty, !readOnly || !ws.reminders(for: reminderTarget).isEmpty { ReminderButton(title: reminderTitle(b), target: reminderTarget).opacity(hover || !ws.reminders(for: reminderTarget).isEmpty ? 1 : 0) }
                     ForEach(others, id: \.self) { n in
                         Text(n).font(.system(size: 10, weight: .semibold)).padding(.horizontal, 6).padding(.vertical, 1)
                             .background(Theme.accent, in: Capsule()).foregroundStyle(Theme.onAccent)
@@ -202,8 +193,10 @@ struct BlockRow: View {
                 .background(b.kind == .callout ? Theme.accentSoft : (b.kind == .code ? Theme.fill : .clear), in: RoundedRectangle(cornerRadius: 8))
                 if slash && !readOnly { slashMenu(b) }
             }
+            .overlay(alignment: .bottomLeading) { if let r = sel, focus.wrappedValue == blockID, !readOnly { selectionBar(b, r).offset(x: 28, y: 42) } }
+            .zIndex(sel != nil ? 5 : 0)
             .onHover { hover = $0 }
-            .onChange(of: focus.wrappedValue) { _, new in if new != blockID { editing = false } }
+            .onChange(of: focus.wrappedValue) { _, new in if new != blockID { editing = false; sel = nil } }
         }
     }
 
@@ -213,14 +206,75 @@ struct BlockRow: View {
         return readOnly || (!editing && focus.wrappedValue != blockID)
     }
 
+    private func painted(_ text: String) -> AttributedString {
+        var (t, marks) = InlineMarkdown.highlighted(text)
+        for m in marks {
+            let from = t.index(t.startIndex, offsetByCharacters: m.lowerBound), to = t.index(t.startIndex, offsetByCharacters: m.upperBound)
+            t[from..<to].backgroundColor = Theme.highlight
+        }
+        return t
+    }
+
     private func rendered(_ b: Block) -> some View {
-        Text(InlineMarkdown.attributed(b.text)).font(font(b.kind))
+        Text(painted(b.text)).font(font(b.kind))
             .foregroundStyle(b.kind == .todo && b.checked ? Color.secondary : Color.primary)
             .strikethrough(b.kind == .todo && b.checked)
             .tint(Theme.accent)
             .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
             .onTapGesture { if !readOnly { editing = true } }
             .help(readOnly ? "" : "Click to edit")
+    }
+
+    // MARK: Editing, selection and reminders
+
+    private var reminderTarget: Reminder.Target { .init(kind: .block, a: pageID, b: blockID) }
+    private func reminderTitle(_ b: Block) -> String { InlineMarkdown.plain(b.text) }
+
+    @ViewBuilder private func editor(_ b: Block) -> some View {
+        let text = Binding(get: { block?.text ?? "" }, set: { v in ws.editPage(pageID) { p in if let i = p.blocks.firstIndex(where: { $0.id == blockID }) { p.blocks[i].text = v } } })
+        if #available(macOS 15, *) {
+            SelectableField(text: text, onSelection: { sel = $0 }) { styled($0, b) }
+        } else {
+            styled(TextField("Type / for blocks", text: text, axis: .vertical), b)
+        }
+    }
+
+    private func styled<V: View>(_ field: V, _ b: Block) -> some View {
+        field.textFieldStyle(.plain)
+            .font(font(b.kind))
+            .foregroundStyle(b.kind == .todo && b.checked ? Color.secondary : Color.primary)
+            .strikethrough(b.kind == .todo && b.checked)
+            .focused(focus, equals: blockID)
+            .onAppear { if editing { focus.wrappedValue = blockID } }
+            .disabled(readOnly)
+            .onSubmit { addAfter(b) }
+            .onKeyPress(.delete) { if b.text.isEmpty, (ws.page(pageID)?.blocks.count ?? 0) > 1 { remove(); return .handled }; return .ignored }
+    }
+
+    private func selectedText(_ b: Block, _ r: Range<Int>) -> String {
+        guard r.upperBound <= b.text.count else { return "" }
+        let a = b.text.index(b.text.startIndex, offsetBy: r.lowerBound), z = b.text.index(b.text.startIndex, offsetBy: r.upperBound)
+        return String(b.text[a..<z])
+    }
+
+    /// Appears under a selection: highlight it, set a reminder from it, schedule it, or ask an AI about it.
+    private func selectionBar(_ b: Block, _ r: Range<Int>) -> some View {
+        let chosen = selectedText(b, r)
+        return HStack(spacing: 2) {
+            barButton("Highlight", icon: "highlighter") { ws.editPage(pageID) { p in if let i = p.blocks.firstIndex(where: { $0.id == blockID }) { p.blocks[i].text = InlineMarkdown.toggleHighlight(in: p.blocks[i].text, range: r) } }; sel = nil }
+            ReminderButton(title: InlineMarkdown.plain(chosen), target: reminderTarget, label: "Remind me").font(.system(size: 12.5, weight: .semibold)).foregroundStyle(Theme.accent)
+            ReminderButton(title: InlineMarkdown.plain(chosen), target: reminderTarget, startWithPicker: true, label: "Schedule")
+            Divider().frame(height: 16).padding(.horizontal, 3)
+            barButton("Ask AI", icon: "sparkles") {
+                Clipboard.copy("Here is a passage from my Antsly page \"\(ws.page(pageID)?.title ?? "")\":\n\n\(chosen)\n\nTell me what I should do about it, and when.")
+                AppModel.shared.show("Prompt copied. Paste it into your AI agent.")
+            }
+        }.padding(4).background(Theme.card, in: RoundedRectangle(cornerRadius: 10)).overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.hairline.opacity(2)))
+            .shadow(color: .black.opacity(0.12), radius: 8, y: 3).fixedSize()
+    }
+
+    private func barButton(_ title: String, icon: String, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) { Label(title, systemImage: icon).font(.system(size: 12.5)).padding(.horizontal, 8).padding(.vertical, 4).contentShape(Rectangle()) }.buttonStyle(.plain)
     }
 
     @ViewBuilder private func lead(_ b: Block) -> some View {
@@ -239,6 +293,12 @@ struct BlockRow: View {
     private func handle(_ b: Block) -> some View {
         Menu {
             if !(block?.kind.isAsset ?? false) { ForEach(Block.Kind.writable, id: \.self) { k in Button(label(k)) { setKind(k) } }; Divider() }
+            if !(block?.kind.isAsset ?? false), !(block?.text.isEmpty ?? true) {
+                Button((block?.text.hasPrefix("==") ?? false) ? "Remove highlight" : "Highlight block") {
+                    ws.editPage(pageID) { p in if let i = p.blocks.firstIndex(where: { $0.id == blockID }) { p.blocks[i].text = InlineMarkdown.toggleHighlight(in: p.blocks[i].text, range: 0..<p.blocks[i].text.count) } }
+                }
+                Divider()
+            }
             Button("Delete block…", role: .destructive) { confirmDelete = true }
         } label: { Image(systemName: "line.3.horizontal").font(.system(size: 11)).foregroundStyle(.secondary).frame(width: 18, height: 22).contentShape(Rectangle()) }
             .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().opacity(hover && !readOnly ? 1 : 0).help("Change block type")
@@ -280,6 +340,25 @@ struct BlockRow: View {
             p.blocks.remove(at: i)
         }
         focus.wrappedValue = prev
+    }
+}
+
+/// A text field that reports which characters are selected. Needs macOS 15; on older systems the block menu highlights the whole block.
+@available(macOS 15, *)
+struct SelectableField<Decorated: View>: View {
+    @Binding var text: String
+    var onSelection: (Range<Int>?) -> Void
+    var decorate: (TextField<Text>) -> Decorated
+    @State private var selection: TextSelection?
+
+    var body: some View {
+        decorate(TextField("Type / for blocks", text: $text, selection: $selection, axis: .vertical))
+            .onChange(of: selection) { _, s in onSelection(range(s)) }
+    }
+
+    private func range(_ s: TextSelection?) -> Range<Int>? {
+        guard let s, case .selection(let r) = s.indices, !r.isEmpty, r.upperBound <= text.endIndex else { return nil }
+        return text.distance(from: text.startIndex, to: r.lowerBound)..<text.distance(from: text.startIndex, to: r.upperBound)
     }
 }
 

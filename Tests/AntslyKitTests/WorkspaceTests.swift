@@ -261,4 +261,62 @@ final class UndoTests: XCTestCase {
         XCTAssertTrue(InlineMarkdown.hasMarkup("Visit https://example.com"))
         XCTAssertEqual(InlineMarkdown.attributed("[a](https://x.io)").runs.compactMap(\.link).count, 1)   // not linkified twice
     }
+
+    // MARK: Reminders, Today and highlights
+
+    private var cal: Calendar { var c = Calendar(identifier: .gregorian); c.timeZone = TimeZone(identifier: "UTC")!; c.firstWeekday = 2; return c }
+    private func date(_ y: Int, _ m: Int, _ d: Int, _ h: Int = 0, _ min: Int = 0) -> Date { cal.date(from: DateComponents(year: y, month: m, day: d, hour: h, minute: min))! }
+
+    func testPlannerPicksNextFreeWorkingSlot() {
+        let thu = date(2026, 11, 5, 10, 10)                                   // a Thursday
+        XCTAssertEqual(ReminderPlanner.suggest(after: thu, taken: [], calendar: cal), date(2026, 11, 5, 10, 30))
+        XCTAssertEqual(ReminderPlanner.suggest(after: thu, taken: [date(2026, 11, 5, 10, 30)], calendar: cal), date(2026, 11, 5, 11, 0))    // a slot closer than 30 min is taken
+        XCTAssertEqual(ReminderPlanner.suggest(after: date(2026, 11, 5, 18, 0), taken: [], calendar: cal), date(2026, 11, 6, 9, 0))         // after hours: tomorrow
+        XCTAssertEqual(ReminderPlanner.suggest(after: date(2026, 11, 6, 17, 40), taken: [], calendar: cal), date(2026, 11, 9, 9, 0))        // Friday night: Monday
+    }
+
+    func testTodayPlanGroupsWhatIsDueAndLate() {
+        let now = date(2026, 11, 5, 9, 0)
+        let ph = Plan.Phase(name: "P", color: "#000")
+        let plan = Plan(title: "Launch", phases: [ph], tasks: [
+            Plan.Task(phaseID: ph.id, name: "Ends today", start: date(2026, 11, 1), end: date(2026, 11, 6)),
+            Plan.Task(phaseID: ph.id, name: "Late", start: date(2026, 10, 20), end: date(2026, 11, 3)),
+            Plan.Task(phaseID: ph.id, name: "Finished", start: date(2026, 10, 20), end: date(2026, 11, 3), status: .completed)])
+        var db = Database.tasks(); db.rows = [.init(id: "r1", cells: ["name": "Fix login", "status": "In progress", "due": "2026-11-05"]), .init(id: "r2", cells: ["name": "Done one", "status": "Done", "due": "2026-11-05"])]
+        let page = Page(id: "pg", title: "Notes", blocks: [Block(id: "b1", kind: .todo, text: "Call Sam"), Block(id: "b2", kind: .todo, text: "Booked", checked: false), Block(id: "b3", kind: .todo, text: "Ticked", checked: true)])
+        let rem = [Reminder(title: "Booked", when: date(2026, 11, 5, 14), target: .init(kind: .block, a: "pg", b: "b2")), Reminder(title: "Old", when: date(2026, 11, 4, 9)), Reminder(title: "Finished", when: date(2026, 11, 5, 8), done: true)]
+        let t = TodayPlan.build(pages: [page], databases: [db], plans: [plan], reminders: rem, now: now, calendar: cal)
+        XCTAssertEqual(Set(t.schedule.map(\.title)), ["Ends today", "Fix login", "Booked"])
+        XCTAssertEqual(t.overdue.map(\.title).sorted(), ["Late", "Old"])
+        XCTAssertEqual(t.overdue.first { $0.title == "Late" }?.overdueDays, 3)   // it last ran on the 2nd
+        XCTAssertEqual(t.dueToday, 2); XCTAssertEqual(t.remindersToday, 1)
+        XCTAssertEqual(t.suggestions.map(\.title), ["Call Sam"])                  // booked and ticked to-dos are left alone
+        XCTAssertEqual(t.suggestions.first?.slot, date(2026, 11, 5, 9, 30))
+        XCTAssertTrue(t.text(now: now).contains("Overdue:"))
+    }
+
+    func testRemindersSaveAndLoad() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("antsly-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = WorkspaceStore(root: dir)
+        let r = [Reminder(id: "x", title: "Call", when: Date(timeIntervalSince1970: 1_800_000_000), target: .init(kind: .row, a: "d", b: "r"), nudge: true)]
+        try store.save(r)
+        XCTAssertEqual(store.loadReminders().first?.target, r[0].target)
+        XCTAssertEqual(store.loadReminders().first?.nudge, true)
+    }
+
+    func testHighlightMarksParseAndToggle() {
+        let h = InlineMarkdown.highlighted("Ship ==the first build== and **go**")
+        XCTAssertEqual(String(h.text.characters), "Ship the first build and go")
+        XCTAssertEqual(h.marks, [5..<20])
+        XCTAssertTrue(InlineMarkdown.hasMarkup("==x=="))
+        XCTAssertEqual(InlineMarkdown.toggleHighlight(in: "Ship the build", range: 5..<14), "Ship ==the build==")
+        XCTAssertEqual(InlineMarkdown.toggleHighlight(in: "Ship ==the build==", range: 5..<18), "Ship the build")      // selection includes the marks
+        XCTAssertEqual(InlineMarkdown.toggleHighlight(in: "Ship ==the build==", range: 7..<16), "Ship the build")      // selection is just inside them
+        XCTAssertEqual(InlineMarkdown.toggleHighlight(in: "a == b", range: 0..<0), "a == b")
+    }
+
+    func testPlainStripsMarkup() {
+        XCTAssertEqual(InlineMarkdown.plain("Tag `v0.1.0` and ==ship== **it** [now](https://x.io)"), "Tag v0.1.0 and ship it now")
+    }
 }

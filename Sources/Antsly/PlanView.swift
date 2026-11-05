@@ -231,6 +231,7 @@ struct TaskEditor: View {
                 Picker("Status", selection: Binding(get: { t.status }, set: { v in set { $0.status = v; if v == .completed { $0.progress = 1 } } })) { ForEach(Plan.Status.allCases, id: \.self) { Text($0.label).tag($0) } }
                 HStack { Text("Progress"); Slider(value: Binding(get: { t.progress }, set: { v in set { $0.progress = v; if v >= 1 { $0.status = .completed } else if v > 0 && $0.status == .notStarted { $0.status = .inProgress } } }), in: 0...1); Text("\(Int(t.progress * 100))%").frame(width: 36) }
                 Toggle("On the critical path", isOn: Binding(get: { t.critical }, set: { v in set { $0.critical = v } })).toggleStyle(.switch).tint(Theme.accent)
+                HStack { Text("Reminder"); Spacer(); ReminderButton(title: t.name, target: .init(kind: .task, a: planID, b: taskID), label: ws.reminders(for: .init(kind: .task, a: planID, b: taskID)).isEmpty ? "Set a reminder" : nil) }
                 if plan.unit == .storyPoints {
                     HStack { Text("Story points"); TextField("0", value: Binding(get: { t.points ?? 0 }, set: { v in set { $0.points = v } }), format: .number).textFieldStyle(.roundedBorder).frame(width: 70) }
                 }

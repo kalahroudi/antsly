@@ -24,6 +24,7 @@ Never call a destructive tool without asking me first.
 ## What it does
 
 - **Pages**: a block editor with text, headings, to-dos, bullets, callouts and code. Type `/` to change a block. Pages are Markdown files.
+- **Today and reminders**: highlight text on any page, and set a reminder on a selection, a to-do, a table row or a plan task. Today gathers deadlines, overdue work, reminders and to-dos without a time, suggests a time for each, and can have your own Claude Code write a short summary of the day. Reminders arrive as macOS notifications, even when Antsly is closed. ![Today](docs/screenshots/today.png)
 - **Rich text**: pages show **bold**, *italic*, `code`, links and web addresses formatted, and switch back to plain Markdown when you click to edit. Copied web and mail content keeps its formatting.
 - **Drop and paste**: drop text, images, PDFs or any file onto a page. Text is sorted into to-dos, bullets and headings at once, and "Organise with AI" refines it through your own Claude Code. Files are copied into `assets/`.
 - **Databases**: table and board views with typed columns (status, choice, date, person, number, checkbox, link), group edit and delete, and one-click prompts for your AI agent. Rows are JSON files.
@@ -61,7 +62,7 @@ Requires macOS 14 or later and the Swift 6 toolchain.
 
 ## Where your data lives
 
-`~/Documents/Antsly/` (or iCloud Drive when sync is on): `pages/*.md`, `databases/*.json`, `plans/*.json`, `assets/*`. App logs and update files live in `~/Library/Application Support/Antsly/`. Delete both to uninstall completely.
+`~/Documents/Antsly/` (or iCloud Drive when sync is on): `pages/*.md`, `databases/*.json`, `plans/*.json`, `reminders.json`, `assets/*`. App logs and update files live in `~/Library/Application Support/Antsly/`. Delete both to uninstall completely.
 
 ## License
 

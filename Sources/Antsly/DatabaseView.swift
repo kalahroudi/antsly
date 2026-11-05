@@ -53,7 +53,7 @@ struct DatabaseView: View {
                     .popover(isPresented: $showColumn) {
                         HStack { TextField("Column name", text: $newColumn).frame(width: 160).onSubmit(addColumn); Button("Add", action: addColumn).buttonStyle(Pill(kind: .primary)) }.padding(12)
                     }.help("Add a column").accessibilityLabel("Add a column")
-                Color.clear.frame(width: 28 + 28, height: 1)
+                Color.clear.frame(width: 28 + 28 + 28, height: 1)
             }.padding(.horizontal, 14).padding(.vertical, 8)
             Divider()
             StyledScroll {
@@ -62,6 +62,7 @@ struct DatabaseView: View {
                         HStack(spacing: 0) {
                             checkbox(selection.contains(r.id)) { if !selection.insert(r.id).inserted { selection.remove(r.id) } }.accessibilityLabel("Select row")
                             ForEach(db.columns) { c in cell(db, r, c) }
+                            ReminderButton(title: r.cells[db.columns.first?.id ?? "name"] ?? "", target: .init(kind: .row, a: id, b: r.id), compact: true).frame(width: 28)
                             rowMenu(db, r)
                             Button(role: .destructive) { pendingRows = [r.id]; confirmDelete = true } label: { Image(systemName: "trash").font(.system(size: 11)).foregroundStyle(.secondary).frame(width: 28, height: 22).contentShape(Rectangle()) }
                                 .buttonStyle(.plain).help("Delete row").accessibilityLabel("Delete row")

@@ -15,6 +15,7 @@ final class WorkspaceModel {
     var pages: [Page] = []
     var databases: [Database] = []
     var plans: [Plan] = []
+    var reminders: [Reminder] = []
     var selected: Item?
     var query = ""
     var loaded = false
@@ -37,6 +38,8 @@ final class WorkspaceModel {
     @ObservationIgnored private var dirtyPages = Set<String>()
     @ObservationIgnored private var dirtyDBs = Set<String>()
     @ObservationIgnored private var dirtyPlans = Set<String>()
+    @ObservationIgnored private var dirtyReminders = false
+    @ObservationIgnored private var toasted = Set<String>()
     @ObservationIgnored private var deletedBlocks: [String: Set<String>] = [:]
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     @ObservationIgnored private var lastDisk: Date = .distantPast
@@ -57,7 +60,8 @@ final class WorkspaceModel {
 
     func load() {
         try? store.ensure()
-        pages = store.loadPages(); databases = store.loadDatabases(); plans = store.loadPlans()
+        pages = store.loadPages(); databases = store.loadDatabases(); plans = store.loadPlans(); reminders = store.loadReminders()
+        Notifier.shared.sync(reminders)
         if pages.isEmpty && databases.isEmpty && plans.isEmpty { seedWelcome() }
         if selected == nil { selected = pages.first.map { .page($0.id) } }
         loaded = true; lastDisk = diskStamp()
@@ -77,11 +81,12 @@ final class WorkspaceModel {
 
     /// Picks up changes made outside the app (iCloud, git pull, another editor) when nothing here is waiting to be saved.
     func reloadIfChanged() {
-        guard dirtyPages.isEmpty, dirtyDBs.isEmpty, dirtyPlans.isEmpty else { return }
+        guard dirtyPages.isEmpty, dirtyDBs.isEmpty, dirtyPlans.isEmpty, !dirtyReminders else { return }
         let s = diskStamp()
         guard s > lastDisk else { return }
         lastDisk = s
-        pages = store.loadPages(); databases = store.loadDatabases(); plans = store.loadPlans()
+        pages = store.loadPages(); databases = store.loadDatabases(); plans = store.loadPlans(); reminders = store.loadReminders()
+        Notifier.shared.sync(reminders)
     }
 
     private func diskStamp() -> Date {
@@ -91,6 +96,7 @@ final class WorkspaceModel {
                 if let m = try? u.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate, m > latest { latest = m }
             }
         }
+        if let m = try? store.remindersURL.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate, m > latest { latest = m }
         return latest
     }
 
@@ -200,6 +206,38 @@ final class WorkspaceModel {
         } catch { report(error, "Organising with AI") }
     }
 
+    // MARK: Reminders
+
+    func reminders(for target: Reminder.Target) -> [Reminder] { reminders.filter { !$0.done && $0.target == target }.sorted { $0.when < $1.when } }
+
+    func addReminder(title: String, when: Date, target: Reminder.Target, nudge: Bool = false) {
+        let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        reminders.append(Reminder(title: t.isEmpty ? "Reminder" : String(t.prefix(120)), when: when, target: target, nudge: nudge))
+        remindersChanged()
+    }
+    func finishReminder(_ id: String) { if let i = reminders.firstIndex(where: { $0.id == id }) { reminders[i].done = true; remindersChanged() } }
+    func removeReminder(_ id: String) { reminders.removeAll { $0.id == id }; remindersChanged() }
+    private func remindersChanged() { dirtyReminders = true; scheduleSave(); Notifier.shared.sync(reminders) }
+
+    /// Opens what a reminder, deadline or suggestion points at.
+    func open(_ t: Reminder.Target) {
+        switch t.kind {
+        case .block: selected = .page(t.a)
+        case .row: selected = .database(t.a)
+        case .task: selected = .plan(t.a)
+        case .none: return
+        }
+        Nav.shared.pane = .workspace
+    }
+
+    /// Where the installed app would show a system notification, an unbundled build shows a toast instead.
+    func toastDueReminders(now: Date = Date()) {
+        guard !Notifier.shared.available else { return }
+        for r in reminders where !r.done && r.when <= now && !toasted.contains(r.id) {
+            toasted.insert(r.id); show("Reminder: \(r.title)")
+        }
+    }
+
     func removeRemote(pageID: String) { pages.removeAll { $0.id == pageID }; store.delete(pageID: pageID); if selected == .page(pageID) { selected = nil } }
 
     func newPage() { recordUndo(UUID().uuidString); let p = Page(); pages.insert(p, at: 0); dirtyPages.insert(p.id); selected = .page(p.id); scheduleSave(); Collab.shared.send(p) }
@@ -245,8 +283,9 @@ final class WorkspaceModel {
         for id in dirtyPages { if let p = page(id) { do { try store.save(p) } catch { AppLog.error(error, context: "save page") } } }
         for id in dirtyDBs { if let d = databases.first(where: { $0.id == id }) { do { try store.save(d) } catch { AppLog.error(error, context: "save database") } } }
         for id in dirtyPlans { if let p = plans.first(where: { $0.id == id }) { do { try store.save(PlanMath.snapshotIfDue(p)) } catch { AppLog.error(error, context: "save plan") } } }
-        let any = !(dirtyPages.isEmpty && dirtyDBs.isEmpty && dirtyPlans.isEmpty)
-        dirtyPages = []; dirtyDBs = []; dirtyPlans = []
+        if dirtyReminders { do { try store.save(reminders) } catch { AppLog.error(error, context: "save reminders") } }
+        let any = !(dirtyPages.isEmpty && dirtyDBs.isEmpty && dirtyPlans.isEmpty) || dirtyReminders
+        dirtyPages = []; dirtyDBs = []; dirtyPlans = []; dirtyReminders = false
         if any { lastDisk = diskStamp() }
     }
 

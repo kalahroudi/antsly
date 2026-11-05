@@ -19,6 +19,7 @@ enum Theme {
     static let warnSoft = dynamic(light: rgb(0xFFF4E0), dark: rgb(0xFBBF24, 0.14))
     static let danger = dynamic(light: rgb(0xC0302B), dark: rgb(0xF87171))
     static let dangerSoft = dynamic(light: rgb(0xFDE9E7), dark: rgb(0xF87171, 0.14))
+    static let highlight = dynamic(light: rgb(0xF5BE32, 0.38), dark: rgb(0xFBBF24, 0.32))
     static let card = dynamic(light: .white, dark: rgb(0x26272B))
     static let pane = dynamic(light: rgb(0xF5F5F7), dark: rgb(0x1C1C1F))
     static let sidebar = dynamic(light: rgb(0xE8E9EE), dark: rgb(0x232326))

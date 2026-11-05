@@ -38,8 +38,9 @@ enum SnapshotMode {
             Shot(name: "plan-\(name)\(dark ? "-dark" : "")", dark: dark, size: CGSize(width: 1240, height: 800)) {
                 WorkspaceModel.shared.selected = .plan(WorkspaceModel.shared.plans[0].id); Nav.shared.pane = .workspace; Nav.shared.planTab = tab; Nav.shared.reportResources = resources; return AnyView(ManagerView()) }
         }
+        func today() -> Shot { Shot(name: "today", dark: false, size: CGSize(width: 1240, height: 800)) { Nav.shared.pane = .today; return AnyView(ManagerView()) } }
         func share() -> Shot { Shot(name: "sharing", dark: false, size: CGSize(width: 1240, height: 800)) { Nav.shared.pane = .sharing; return AnyView(ManagerView()) } }
-        return [page(), page(dark: true), db(), plan(.timeline, "timeline"), plan(.timeline, "timeline", dark: true), plan(.workload, "workload"), plan(.report, "report"), plan(.report, "resources", resources: true), share(), pop(), pop(dark: true), manager(.settings), manager(.help)]
+        return [today(), page(), page(dark: true), db(), plan(.timeline, "timeline"), plan(.timeline, "timeline", dark: true), plan(.workload, "workload"), plan(.report, "report"), plan(.report, "resources", resources: true), share(), pop(), pop(dark: true), manager(.settings), manager(.help)]
     }
 
     @MainActor static func render(_ shot: Shot, to dir: String) async {
@@ -101,7 +102,7 @@ struct PopoverShot: View {
         let meet = Page(id: "meet", title: "Meeting notes", blocks: [Block(kind: .text, text: "Weekly sync.")])
         let wiki = Page(id: "wiki", title: "Product wiki", blocks: [Block(kind: .text, text: "How Antsly works.")])
         var roadmap = Database.tasks(title: "Roadmap")
-        roadmap.rows = [("Block editor", "In progress", "Mo", "Nov 12"), ("Database views", "Planned", "Mo", "Nov 20"), ("Cloud sync", "In progress", "Mo", "Nov 24"), ("App icon and README", "Done", "Mo", "Nov 8"), ("GitHub Pages site", "Planned", "Mo", "Nov 28")]
+        roadmap.rows = [("Block editor", "In progress", "Mo", "2026-11-05"), ("Database views", "Planned", "Mo", "2026-11-20"), ("Cloud sync", "In progress", "Mo", "2026-11-03"), ("App icon and README", "Done", "Mo", "2026-11-08"), ("GitHub Pages site", "Planned", "Mo", "2026-11-28")]
             .map { .init(cells: ["name": $0.0, "status": $0.1, "owner": $0.2, "due": $0.3]) }
         let ph = [Plan.Phase(id: "a", name: "Foundation", color: "#2563EB"), .init(id: "b", name: "Front-end upgrade", color: "#D97706"), .init(id: "c", name: "Backend integrity", color: "#059669"), .init(id: "d", name: "Performance", color: "#DC2626")]
         let ppl = ["Jinhua", "Dan", "Albert", "Josh", "Rouh", "Sri", "Mo"].map { Plan.Person(id: $0, name: $0) }
@@ -114,5 +115,10 @@ struct PopoverShot: View {
             t("c", "AdonisJS to ExpressJS", ["Rouh"], 13, 19), t("c", "Backend dependency updates", ["Rouh", "Sri", "Mo"], 13, 19), t("c", "Type checking and safety", ["Rouh"], 13, 19),
             t("d", "Load test environment", ["Rouh", "Sri", "Mo", "Dan"], 19, 22, crit: true), t("d", "Increase test coverage", ["Sri", "Dan", "Rouh", "Mo"], 19, 22), t("d", "Laravel LTS update", ["Sri", "Dan", "Mo"], 19, 22, .atRisk)])
         WorkspaceModel.shared.loadDemo(pages: [launch, meet, wiki], databases: [roadmap], plans: [plan])
+        let cal = Calendar.current
+        func at(_ h: Int, _ m: Int = 0, days: Int = 0) -> Date { cal.date(bySettingHour: h, minute: m, second: 0, of: cal.date(byAdding: .day, value: days, to: .now)!)! }
+        WorkspaceModel.shared.reminders = [Reminder(title: "Review the release notes", when: at(11)), Reminder(title: "Sync with Albert", when: at(14)), Reminder(title: "Reply to the tester feedback", when: at(9, days: -1))]
+        TodayModel.shared.briefing = "Two things are due today and Cloud sync is already late. Tagging v0.1.0 is the pressing one, and the demo it needs has no time yet. Moving a backend task would free Rouh next week."
+        TodayModel.shared.briefingAt = at(9, 2)
     }
 }

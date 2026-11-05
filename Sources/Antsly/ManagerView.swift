@@ -5,10 +5,10 @@ import AntslyKit
 
 /// Panes of the Manager window. Pages, databases and plans share the `workspace` pane; what shows is the sidebar selection.
 enum Pane: String, CaseIterable, Identifiable {
-    case workspace, sharing, settings, help
+    case workspace, today, sharing, settings, help
     var id: String { rawValue }
-    var title: String { switch self { case .workspace: "Workspace"; case .sharing: "Sharing"; case .settings: "Settings"; case .help: "Help" } }
-    var symbol: String { switch self { case .workspace: "doc.text"; case .sharing: "person.2.wave.2"; case .settings: "gearshape"; case .help: "questionmark.circle" } }
+    var title: String { switch self { case .workspace: "Workspace"; case .today: "Today"; case .sharing: "Sharing"; case .settings: "Settings"; case .help: "Help" } }
+    var symbol: String { switch self { case .workspace: "doc.text"; case .today: "calendar"; case .sharing: "person.2.wave.2"; case .settings: "gearshape"; case .help: "questionmark.circle" } }
 }
 
 @MainActor @Observable
@@ -84,6 +84,7 @@ struct ManagerView: View {
         } else {
             switch nav.pane {
             case .workspace: WorkspaceDetail()
+            case .today: TodayView()
             case .sharing: SharingPane()
             case .settings: SettingsPane(initialTab: agentsTab ? .agents : .general)
             case .help: HelpPane()
@@ -157,6 +158,7 @@ struct Sidebar: View {
                 }.buttonStyle(.plain).help(collapsed ? "Expand sidebar" : "Collapse to icons").accessibilityLabel(collapsed ? "Expand sidebar" : "Collapse sidebar")
             }.padding(.top, 14).padding(.bottom, 8).padding(.horizontal, collapsed ? 0 : 6)
             if !collapsed { SearchBox(prompt: "Search pages", text: $w.query).padding(.bottom, 6) }
+            item(.today).padding(.bottom, 4)
             StyledScroll {
                 VStack(alignment: .leading, spacing: 2) {
                     if !ws.query.isEmpty && !collapsed { results } else { lists }
@@ -222,6 +224,7 @@ struct Sidebar: View {
                     Text(p.title).font(.system(size: 13, weight: on ? .semibold : .regular)).lineLimit(1).fixedSize(horizontal: true, vertical: false)
                     Spacer(minLength: 4)
                     if p == .settings, Updater.shared.available != nil { Circle().fill(Theme.accent).frame(width: 7, height: 7) }
+                    if p == .today { let n = TodayPlan.build(pages: [], databases: ws.databases, plans: ws.plans, reminders: ws.reminders).badge; if n > 0 { Text("\(n)").font(.system(size: 11.5, weight: .semibold)).foregroundStyle(on ? Theme.accent : .secondary) } }
                 }
             }
             .padding(.horizontal, 10).padding(.vertical, 6)
