@@ -120,7 +120,7 @@ struct Timeline: View {
                     StyledScroll {
                         VStack(spacing: 0) {
                             ForEach(plan.phases) { ph in
-                                row(left: AnyView(HStack(spacing: 6) { Circle().fill(Color(hex: ph.color)).frame(width: 9, height: 9); Text(ph.name).font(.system(size: 12.5, weight: .semibold)).lineLimit(1) }), w: w, x: x, a: a, bar: nil, phase: ph)
+                                row(left: AnyView(phaseLabel(ph)), w: w, x: x, a: a, bar: nil, phase: ph)
                                 ForEach(plan.tasks.filter { $0.phaseID == ph.id }) { t in
                                     row(left: AnyView(Text(t.name).font(.system(size: 12.5)).lineLimit(1).padding(.leading, 14)), w: w, x: x, a: a, bar: t, phase: ph)
                                 }
@@ -160,6 +160,24 @@ struct Timeline: View {
         .background(bar == nil ? Theme.fill : .clear)
         .overlay(alignment: .bottom) { Divider().opacity(0.5) }
         .contentShape(Rectangle()).onTapGesture { if let t = bar { edit(t.id) } }
+    }
+
+    /// A phase's name is edited in place. The dot opens colour and delete.
+    private func phaseLabel(_ ph: Plan.Phase) -> some View {
+        let palette = ["#2563EB", "#D97706", "#059669", "#DC2626", "#7C3AED", "#6B7280"]
+        let count = plan.tasks.filter { $0.phaseID == ph.id }.count
+        return HStack(spacing: 6) {
+            Menu {
+                ForEach(palette, id: \.self) { c in Button { ws.editPlan(plan.id) { p in if let i = p.phases.firstIndex(where: { $0.id == ph.id }) { p.phases[i].color = c } } } label: { Label(c == ph.color ? "Current colour" : "Colour", systemImage: "circle.fill") }.tint(Color(hex: c)) }
+                Divider()
+                Button("Delete phase\(count > 0 ? " and its \(count) task\(count == 1 ? "" : "s")" : "")", role: .destructive) {
+                    ws.editPlan(plan.id) { p in p.phases.removeAll { $0.id == ph.id }; p.tasks.removeAll { $0.phaseID == ph.id } }
+                }
+            } label: { Circle().fill(Color(hex: ph.color)).frame(width: 10, height: 10).frame(width: 20, height: 24).contentShape(Rectangle()) }
+                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help("Phase colour and delete")
+            TextField("Phase name", text: Binding(get: { ph.name }, set: { v in ws.editPlan(plan.id) { p in if let i = p.phases.firstIndex(where: { $0.id == ph.id }) { p.phases[i].name = v } } }))
+                .textFieldStyle(.plain).font(.system(size: 12.5, weight: .semibold)).lineLimit(1)
+        }
     }
 
     private func owners(_ t: Plan.Task) -> String {
