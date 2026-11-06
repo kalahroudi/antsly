@@ -363,22 +363,21 @@ struct SelectableField<Decorated: View>: View {
             }
     }
 
-    /// Reads the selection on the next turn of the run loop, and only if the text has been quiet for a moment.
+    /// Reads the selection once the text has been quiet for a moment. The selection binding is only a trigger:
+    /// its indices trap when read against some strings (long pastes), so the range comes from the AppKit text view instead.
     private func settle() {
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(250))
             guard Date().timeIntervalSince(editedAt) > 0.2 else { return }
-            onSelection(range(selection))
+            onSelection(range())
         }
     }
 
-    private func range(_ s: TextSelection?) -> Range<Int>? {
-        guard let s, case .selection(let r) = s.indices, !r.isEmpty, r.upperBound <= text.endIndex else { return nil }
-        let u = text.unicodeScalars
-        let a = u.distance(from: u.startIndex, to: r.lowerBound), b = u.distance(from: u.startIndex, to: r.upperBound)
-        guard a >= 0, b > a, b <= u.count else { return nil }
-        // Convert scalar offsets to Character offsets, which is what the highlight code counts.
-        let lo = String(u.prefix(a)).count, hi = String(u.prefix(b)).count
+    private func range() -> Range<Int>? {
+        guard let tv = NSApp.keyWindow?.firstResponder as? NSTextView, tv.string == text else { return nil }
+        let ns = tv.selectedRange()
+        guard ns.length > 0, let r = Range(ns, in: text) else { return nil }
+        let lo = text.distance(from: text.startIndex, to: r.lowerBound), hi = text.distance(from: text.startIndex, to: r.upperBound)
         return hi > lo ? lo..<hi : nil
     }
 }
