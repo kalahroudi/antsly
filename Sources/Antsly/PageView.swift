@@ -354,11 +354,21 @@ struct SelectableField<Decorated: View>: View {
     var body: some View {
         decorate(TextField("Type / for blocks", text: $text, selection: $selection, axis: .vertical))
             .onChange(of: selection) { _, s in onSelection(range(s)) }
+            .onChange(of: text) { _, _ in
+                // Indices belong to the text they were made for. After a paste or edit they are stale and unsafe to read.
+                if selection != nil { selection = nil }
+                onSelection(nil)
+            }
     }
 
     private func range(_ s: TextSelection?) -> Range<Int>? {
         guard let s, case .selection(let r) = s.indices, !r.isEmpty, r.upperBound <= text.endIndex else { return nil }
-        return text.distance(from: text.startIndex, to: r.lowerBound)..<text.distance(from: text.startIndex, to: r.upperBound)
+        let u = text.unicodeScalars
+        let a = u.distance(from: u.startIndex, to: r.lowerBound), b = u.distance(from: u.startIndex, to: r.upperBound)
+        guard a >= 0, b > a, b <= u.count else { return nil }
+        // Convert scalar offsets to Character offsets, which is what the highlight code counts.
+        let lo = String(u.prefix(a)).count, hi = String(u.prefix(b)).count
+        return hi > lo ? lo..<hi : nil
     }
 }
 
