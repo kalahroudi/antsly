@@ -350,15 +350,26 @@ struct SelectableField<Decorated: View>: View {
     var onSelection: (Range<Int>?) -> Void
     var decorate: (TextField<Text>) -> Decorated
     @State private var selection: TextSelection?
+    @State private var editedAt = Date.distantPast
 
     var body: some View {
         decorate(TextField("Type / for blocks", text: $text, selection: $selection, axis: .vertical))
-            .onChange(of: selection) { _, s in onSelection(range(s)) }
+            .onChange(of: selection) { _, _ in settle() }
             .onChange(of: text) { _, _ in
-                // Indices belong to the text they were made for. After a paste or edit they are stale and unsafe to read.
-                if selection != nil { selection = nil }
+                // A paste or edit changes the text and the selection together, and the two can arrive out of step.
+                // Indices are only safe to read once the text has stopped changing, so drop them and wait.
+                editedAt = Date()
                 onSelection(nil)
             }
+    }
+
+    /// Reads the selection on the next turn of the run loop, and only if the text has been quiet for a moment.
+    private func settle() {
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(250))
+            guard Date().timeIntervalSince(editedAt) > 0.2 else { return }
+            onSelection(range(selection))
+        }
     }
 
     private func range(_ s: TextSelection?) -> Range<Int>? {
